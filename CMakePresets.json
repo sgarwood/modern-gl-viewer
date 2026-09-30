@@ -1,0 +1,50 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "wsl-qt",
+      "displayName": "WSL Qt viewer",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/wsl-qt",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MGV_BUILD_GLFW_APP": "OFF",
+        "MGV_BUILD_QT_APP": "ON",
+        "MGV_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "headless-tests",
+      "displayName": "Headless core tests",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/headless-tests",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MGV_BUILD_GLFW_APP": "OFF",
+        "MGV_BUILD_QT_APP": "OFF",
+        "MGV_WARNINGS_AS_ERRORS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "wsl-qt", "configurePreset": "wsl-qt" },
+    { "name": "headless-tests", "configurePreset": "headless-tests" }
+  ],
+  "testPresets": [
+    {
+      "name": "wsl-qt",
+      "configurePreset": "wsl-qt",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "headless-tests",
+      "configurePreset": "headless-tests",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

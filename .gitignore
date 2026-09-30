@@ -1,0 +1,25 @@
+# Out-of-source build trees
+/build*/
+/cmake-build-*/
+
+# Accidental in-source CMake output
+/CMakeCache.txt
+/CMakeFiles/
+/CTestTestfile.cmake
+/Makefile
+/Testing/
+/_deps/
+/cmake_install.cmake
+/compile_commands.json
+
+# Tooling and editor state
+/.cache/
+/.clangd/
+/.idea/
+/.vscode/
+*.swp
+*.user
+
+# Platform metadata
+.DS_Store
+Thumbs.db
