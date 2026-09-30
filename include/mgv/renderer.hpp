@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mgv/camera_target.hpp"
 #include "mgv/render_backend.hpp"
 #include "mgv/scene.hpp"
 
@@ -14,7 +15,7 @@ struct AssetPaths final {
     std::filesystem::path fragment_shader;
 };
 
-class Renderer final {
+class Renderer final : public CameraTarget {
 public:
     explicit Renderer(std::unique_ptr<RenderBackend> backend);
     ~Renderer();
@@ -27,8 +28,8 @@ public:
     void load(const AssetPaths& paths);
     void load(MeshData mesh, ShaderSources shaders);
     void set_scene(Scene scene);
-    void set_camera(Camera camera);
-    [[nodiscard]] Camera camera() const;
+    void set_camera(Camera camera) override;
+    [[nodiscard]] Camera camera() const override;
     void render(const Frame& frame);
 
 private:

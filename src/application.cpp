@@ -1,5 +1,6 @@
 #include "mgv/application.hpp"
 
+#include "mgv/camera_controller.hpp"
 #include "mgv/opengl_backend.hpp"
 
 #define GLFW_INCLUDE_NONE
@@ -71,12 +72,49 @@ struct Application::Impl final {
             return glfwGetProcAddress(name);
         }));
         renderer->load(config.assets);
+        input = make_orbit_camera_controller(*renderer);
+        glfwSetWindowUserPointer(window.get(), this);
+        glfwSetKeyCallback(window.get(), [](GLFWwindow* native_window, int key, int, int action, int) {
+            if (action != GLFW_PRESS && action != GLFW_REPEAT) {
+                return;
+            }
+            auto& application = *static_cast<Impl*>(glfwGetWindowUserPointer(native_window));
+            switch (key) {
+            case GLFW_KEY_LEFT:
+                application.input->handle(InputAction::orbit_left);
+                break;
+            case GLFW_KEY_RIGHT:
+                application.input->handle(InputAction::orbit_right);
+                break;
+            case GLFW_KEY_UP:
+                application.input->handle(InputAction::orbit_up);
+                break;
+            case GLFW_KEY_DOWN:
+                application.input->handle(InputAction::orbit_down);
+                break;
+            case GLFW_KEY_EQUAL:
+            case GLFW_KEY_KP_ADD:
+                application.input->handle(InputAction::zoom_in);
+                break;
+            case GLFW_KEY_MINUS:
+            case GLFW_KEY_KP_SUBTRACT:
+                application.input->handle(InputAction::zoom_out);
+                break;
+            case GLFW_KEY_HOME:
+            case GLFW_KEY_R:
+                application.input->handle(InputAction::reset_view);
+                break;
+            default:
+                break;
+            }
+        });
     }
 
-    // Declaration order is intentional: GL resources die before the context and GLFW runtime.
+    // Declaration order is intentional: input and GL resources die before the context and GLFW runtime.
     GlfwRuntime runtime;
     Window window;
     std::unique_ptr<Renderer> renderer;
+    std::unique_ptr<InputSink> input;
 };
 
 Application::Application(Config config) : impl_{std::make_unique<Impl>(std::move(config))} {}

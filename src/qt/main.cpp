@@ -10,6 +10,7 @@
 #include <QMainWindow>
 #include <QMenu>
 #include <QMenuBar>
+#include <QStatusBar>
 #include <QSurfaceFormat>
 
 #include <filesystem>
@@ -100,6 +101,22 @@ int main(int argc, char** argv) {
     QObject::connect(reload, &QAction::triggered, viewer, [&, viewer] { viewer->load_assets(assets); });
     auto* quit = file_menu->addAction("E&xit");
     QObject::connect(quit, &QAction::triggered, &application, &QApplication::quit);
+
+    auto* controls_menu = window.menuBar()->addMenu("&Controls");
+    const auto add_control = [controls_menu, viewer](const QString& label, mgv::InputAction input) {
+        auto* action = controls_menu->addAction(label);
+        QObject::connect(action, &QAction::triggered, viewer, [viewer, input] { viewer->handle_input(input); });
+    };
+    add_control("Orbit &left", mgv::InputAction::orbit_left);
+    add_control("Orbit &right", mgv::InputAction::orbit_right);
+    add_control("Orbit &up", mgv::InputAction::orbit_up);
+    add_control("Orbit &down", mgv::InputAction::orbit_down);
+    controls_menu->addSeparator();
+    add_control("Zoom &in", mgv::InputAction::zoom_in);
+    add_control("Zoom &out", mgv::InputAction::zoom_out);
+    add_control("&Reset view", mgv::InputAction::reset_view);
+
+    window.statusBar()->showMessage("Arrow keys: orbit  |  +/−: zoom  |  Home/R: reset");
 
     window.resize(viewer->sizeHint());
     window.show();

@@ -30,6 +30,7 @@ endif()
 
 add_library(mgv_core
     src/camera.cpp
+    src/camera_controller.cpp
     src/material.cpp
     src/obj_loader.cpp
     src/renderer.cpp
@@ -139,6 +140,7 @@ if(BUILD_TESTING)
 
     add_executable(mgv_tests
         tests/camera_test.cpp
+        tests/camera_controller_test.cpp
         tests/obj_loader_test.cpp
         tests/renderer_test.cpp
         tests/scene_test.cpp

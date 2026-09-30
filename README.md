@@ -12,6 +12,7 @@ types.
   vertex deduplication, and generated normals.
 - Runtime GLSL loading with useful file, compiler, and linker diagnostics.
 - Backend-neutral `Scene`, `Renderable`, `Transform`, `Material`, and `Camera` APIs.
+- Frontend-neutral orbit/zoom input through dependency-inverted `InputSink` and `CameraTarget` ports.
 - Shared CPU mesh/material identity mapped to deduplicated backend resources.
 - Backend-neutral `RenderBackend`, `MeshResource`, and `ShaderResource` APIs.
 - RAII ownership for windows, GL buffers, vertex arrays, shaders, and programs.
@@ -52,6 +53,9 @@ If WSLg's accelerated Mesa path is unavailable, software rendering is a useful d
 ```sh
 QT_QPA_PLATFORM=wayland LIBGL_ALWAYS_SOFTWARE=1 ./build/wsl-qt/mgv_qt
 ```
+
+Use the arrow keys to orbit, `+`/`-` to zoom, and `Home` or `R` to reset the camera. The Qt
+Controls menu exposes the same commands as clickable test controls. GLFW uses the same keys.
 
 ## Other build configurations
 
@@ -105,14 +109,9 @@ omit it.
 ## Architecture
 
 ```text
-Qt shell ---------\
-                   -> OpenGL backend -> RenderBackend interface
-GLFW shell -------/                         |
-                                             -> Renderer facade -> Camera
-                                                      |
-Scene -> Renderable -> Transform --------------------|
-                    -> MeshData ---------------------|
-                    -> Material -> ShaderSources ----|
+Qt / GLFW adapter -> InputSink <- OrbitCameraController -> CameraTarget <- Renderer -> Camera
+Qt / GLFW host    -> OpenGL backend -> RenderBackend interface <--------- Renderer
+Scene -> Renderable -> Transform / MeshData / Material -----------------> Renderer
 ```
 
 The CMake targets mirror these boundaries: `mgv::core`, `mgv::opengl`, and the optional Qt/GLFW

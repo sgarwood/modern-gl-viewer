@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mgv/input.hpp"
 #include "mgv/renderer.hpp"
 
 #include <QElapsedTimer>
@@ -10,6 +11,8 @@
 #include <exception>
 #include <memory>
 
+class QKeyEvent;
+
 class QtViewerWidget final : public QOpenGLWidget {
 public:
     explicit QtViewerWidget(mgv::AssetPaths assets, QWidget* parent = nullptr);
@@ -19,11 +22,13 @@ public:
     QtViewerWidget& operator=(const QtViewerWidget&) = delete;
 
     void load_assets(mgv::AssetPaths assets);
+    void handle_input(mgv::InputAction action);
     [[nodiscard]] QSize sizeHint() const override;
 
 protected:
     void initializeGL() override;
     void paintGL() override;
+    void keyPressEvent(QKeyEvent* event) override;
 
 private:
     void cleanup();
@@ -31,6 +36,7 @@ private:
 
     mgv::AssetPaths assets_;
     std::unique_ptr<mgv::Renderer> renderer_;
+    std::unique_ptr<mgv::InputSink> input_;
     QElapsedTimer elapsed_;
     QTimer animation_timer_;
     QString error_;

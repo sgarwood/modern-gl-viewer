@@ -1,9 +1,11 @@
 #include "qt_viewer_widget.hpp"
 
+#include "mgv/camera_controller.hpp"
 #include "mgv/opengl_backend.hpp"
 
 #include <QByteArray>
 #include <QColor>
+#include <QKeyEvent>
 #include <QOpenGLContext>
 #include <QPainter>
 
@@ -14,6 +16,7 @@
 
 QtViewerWidget::QtViewerWidget(mgv::AssetPaths assets, QWidget* parent)
     : QOpenGLWidget{parent}, assets_{std::move(assets)} {
+    setFocusPolicy(Qt::StrongFocus);
     animation_timer_.setInterval(16);
     animation_timer_.setTimerType(Qt::PreciseTimer);
     connect(&animation_timer_, &QTimer::timeout, this, [this] { update(); });
@@ -45,6 +48,14 @@ void QtViewerWidget::load_assets(mgv::AssetPaths assets) {
     update();
 }
 
+void QtViewerWidget::handle_input(mgv::InputAction action) {
+    if (!input_) {
+        return;
+    }
+    input_->handle(action);
+    update();
+}
+
 QSize QtViewerWidget::sizeHint() const {
     return {1280, 720};
 }
@@ -57,6 +68,7 @@ void QtViewerWidget::initializeGL() {
             const auto* current = QOpenGLContext::currentContext();
             return current == nullptr ? nullptr : current->getProcAddress(QByteArray{name});
         }));
+        input_ = mgv::make_orbit_camera_controller(*renderer_);
         renderer_->load(assets_);
         error_.clear();
         elapsed_.start();
@@ -87,7 +99,40 @@ void QtViewerWidget::paintGL() {
     painter.drawText(rect().adjusted(32, 32, -32, -32), Qt::AlignCenter | Qt::TextWordWrap, error_);
 }
 
+void QtViewerWidget::keyPressEvent(QKeyEvent* event) {
+    switch (event->key()) {
+    case Qt::Key_Left:
+        handle_input(mgv::InputAction::orbit_left);
+        break;
+    case Qt::Key_Right:
+        handle_input(mgv::InputAction::orbit_right);
+        break;
+    case Qt::Key_Up:
+        handle_input(mgv::InputAction::orbit_up);
+        break;
+    case Qt::Key_Down:
+        handle_input(mgv::InputAction::orbit_down);
+        break;
+    case Qt::Key_Plus:
+    case Qt::Key_Equal:
+        handle_input(mgv::InputAction::zoom_in);
+        break;
+    case Qt::Key_Minus:
+        handle_input(mgv::InputAction::zoom_out);
+        break;
+    case Qt::Key_Home:
+    case Qt::Key_R:
+        handle_input(mgv::InputAction::reset_view);
+        break;
+    default:
+        QOpenGLWidget::keyPressEvent(event);
+        return;
+    }
+    event->accept();
+}
+
 void QtViewerWidget::cleanup() {
+    input_.reset();
     if (!renderer_) {
         return;
     }
