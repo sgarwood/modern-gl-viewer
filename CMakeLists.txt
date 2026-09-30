@@ -30,9 +30,12 @@ endif()
 
 add_library(mgv_core
     src/camera.cpp
+    src/material.cpp
     src/obj_loader.cpp
     src/renderer.cpp
+    src/scene.cpp
     src/shader_loader.cpp
+    src/transform.cpp
 )
 add_library(mgv::core ALIAS mgv_core)
 target_compile_features(mgv_core PUBLIC cxx_std_20)
@@ -138,7 +141,9 @@ if(BUILD_TESTING)
         tests/camera_test.cpp
         tests/obj_loader_test.cpp
         tests/renderer_test.cpp
+        tests/scene_test.cpp
         tests/shader_loader_test.cpp
+        tests/transform_test.cpp
     )
     target_compile_features(mgv_tests PRIVATE cxx_std_20)
     target_link_libraries(mgv_tests PRIVATE

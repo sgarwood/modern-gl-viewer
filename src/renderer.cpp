@@ -4,19 +4,13 @@
 #include "mgv/shader_loader.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace mgv {
 namespace {
-
-[[nodiscard]] Mat4 identity() {
-    return {1, 0, 0, 0,
-            0, 1, 0, 0,
-            0, 0, 1, 0,
-            0, 0, 0, 1};
-}
 
 [[nodiscard]] Mat4 multiply(const Mat4& lhs, const Mat4& rhs) {
     Mat4 result{};
@@ -30,39 +24,7 @@ namespace {
     return result;
 }
 
-[[nodiscard]] Mat4 translation(float x, float y, float z) {
-    auto result = identity();
-    result[12] = x;
-    result[13] = y;
-    result[14] = z;
-    return result;
-}
-
-[[nodiscard]] Mat4 uniform_scale(float value) {
-    auto result = identity();
-    result[0] = value;
-    result[5] = value;
-    result[10] = value;
-    return result;
-}
-
-[[nodiscard]] Mat4 model_matrix(float elapsed_seconds, const Vec3& center, float scale) {
-    auto rotation = identity();
-    const auto sine = std::sin(elapsed_seconds * 0.35F);
-    const auto cosine = std::cos(elapsed_seconds * 0.35F);
-    rotation[0] = cosine;
-    rotation[2] = -sine;
-    rotation[8] = sine;
-    rotation[10] = cosine;
-    return multiply(rotation, multiply(uniform_scale(scale), translation(-center.x, -center.y, -center.z)));
-}
-
-struct Placement final {
-    Vec3 center;
-    float scale{1.0F};
-};
-
-[[nodiscard]] Placement fit_to_view(const MeshData& mesh) {
+[[nodiscard]] Transform fit_to_view(const MeshData& mesh) {
     auto minimum = mesh.vertices.front().position;
     auto maximum = minimum;
     for (const auto& vertex : mesh.vertices) {
@@ -79,8 +41,22 @@ struct Placement final {
         (minimum.z + maximum.z) * 0.5F,
     };
     const auto extent = std::max({maximum.x - minimum.x, maximum.y - minimum.y, maximum.z - minimum.z});
-    return {.center = center, .scale = extent > 0.0F ? 1.6F / extent : 1.0F};
+    const auto scale = extent > 0.0F ? 1.6F / extent : 1.0F;
+    Transform transform;
+    transform.set_uniform_scale(scale).set_position({
+        -center.x * scale,
+        -center.y * scale,
+        -center.z * scale,
+    });
+    return transform;
 }
+
+struct GpuRenderable final {
+    MeshResource* mesh{};
+    ShaderResource* shader{};
+    Mat4 model_matrix{};
+    bool visible{true};
+};
 
 } // namespace
 
@@ -92,10 +68,11 @@ struct Renderer::Impl final {
     }
 
     std::unique_ptr<RenderBackend> backend;
-    std::unique_ptr<MeshResource> mesh;
-    std::unique_ptr<ShaderResource> shader;
-    Placement placement;
+    std::vector<std::unique_ptr<MeshResource>> meshes;
+    std::vector<std::unique_ptr<ShaderResource>> shaders;
+    std::vector<GpuRenderable> renderables;
     Camera camera;
+    bool scene_loaded{};
 };
 
 Renderer::Renderer(std::unique_ptr<RenderBackend> backend)
@@ -112,15 +89,63 @@ void Renderer::load(MeshData mesh, ShaderSources shaders) {
     if (mesh.empty()) {
         throw std::invalid_argument{"Cannot create an empty mesh"};
     }
-    const auto placement = fit_to_view(mesh);
-    auto new_mesh = impl_->backend->create_mesh(mesh);
-    auto new_shader = impl_->backend->create_shader(shaders);
-    if (!new_mesh || !new_shader) {
-        throw std::runtime_error{"Render backend returned an empty resource"};
+    const auto transform = fit_to_view(mesh);
+    auto shared_mesh = std::make_shared<const MeshData>(std::move(mesh));
+    auto material = std::make_shared<const Material>(std::move(shaders));
+    Scene scene;
+    scene.add(Renderable{std::move(shared_mesh), std::move(material), transform});
+    set_scene(std::move(scene));
+}
+
+void Renderer::set_scene(Scene scene) {
+    if (scene.empty()) {
+        throw std::invalid_argument{"Cannot render an empty scene"};
     }
-    impl_->mesh = std::move(new_mesh);
-    impl_->shader = std::move(new_shader);
-    impl_->placement = placement;
+
+    std::vector<std::unique_ptr<MeshResource>> meshes;
+    std::vector<std::unique_ptr<ShaderResource>> shaders;
+    std::vector<GpuRenderable> renderables;
+    std::unordered_map<const MeshData*, MeshResource*> mesh_cache;
+    std::unordered_map<const Material*, ShaderResource*> shader_cache;
+    renderables.reserve(scene.size());
+
+    for (const auto& renderable : scene.renderables()) {
+        const auto* mesh_key = renderable.mesh().get();
+        auto* gpu_mesh = mesh_cache.contains(mesh_key) ? mesh_cache.at(mesh_key) : nullptr;
+        if (gpu_mesh == nullptr) {
+            auto resource = impl_->backend->create_mesh(*renderable.mesh());
+            if (!resource) {
+                throw std::runtime_error{"Render backend returned an empty mesh resource"};
+            }
+            gpu_mesh = resource.get();
+            mesh_cache.emplace(mesh_key, gpu_mesh);
+            meshes.push_back(std::move(resource));
+        }
+
+        const auto* shader_key = renderable.material().get();
+        auto* gpu_shader = shader_cache.contains(shader_key) ? shader_cache.at(shader_key) : nullptr;
+        if (gpu_shader == nullptr) {
+            auto resource = impl_->backend->create_shader(renderable.material()->shaders());
+            if (!resource) {
+                throw std::runtime_error{"Render backend returned an empty shader resource"};
+            }
+            gpu_shader = resource.get();
+            shader_cache.emplace(shader_key, gpu_shader);
+            shaders.push_back(std::move(resource));
+        }
+
+        renderables.push_back({
+            .mesh = gpu_mesh,
+            .shader = gpu_shader,
+            .model_matrix = renderable.transform().matrix(),
+            .visible = renderable.visible(),
+        });
+    }
+
+    impl_->meshes = std::move(meshes);
+    impl_->shaders = std::move(shaders);
+    impl_->renderables = std::move(renderables);
+    impl_->scene_loaded = true;
 }
 
 void Renderer::set_camera(Camera camera) {
@@ -132,16 +157,21 @@ Camera Renderer::camera() const {
 }
 
 void Renderer::render(const Frame& frame) {
-    if (!impl_->mesh || !impl_->shader) {
+    if (!impl_->scene_loaded) {
         throw std::logic_error{"Renderer assets have not been loaded"};
     }
     const auto aspect = static_cast<float>(frame.framebuffer_width) /
                         static_cast<float>(std::max(frame.framebuffer_height, 1));
-    const auto transform = multiply(
-        impl_->camera.view_projection_matrix(std::max(aspect, 0.01F)),
-        model_matrix(frame.elapsed_seconds, impl_->placement.center, impl_->placement.scale));
+    const auto view_projection = impl_->camera.view_projection_matrix(std::max(aspect, 0.01F));
     impl_->backend->begin_frame(frame);
-    impl_->backend->draw(*impl_->mesh, *impl_->shader, transform);
+    for (const auto& renderable : impl_->renderables) {
+        if (renderable.visible) {
+            impl_->backend->draw(
+                *renderable.mesh,
+                *renderable.shader,
+                multiply(view_projection, renderable.model_matrix));
+        }
+    }
     impl_->backend->end_frame();
 }
 

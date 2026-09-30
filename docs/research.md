@@ -117,6 +117,9 @@ documented launch command explicitly selects Qt's Wayland platform plugin.
 - Each optional frontend has its own CMake option and target. `mgv::opengl` accepts an injected
   procedure loader, allowing Qt and GLFW to share the exact backend without either depending on
   the other.
+- The scene layer separates immutable shared assets (`MeshData`, `Material`) from per-instance
+  state (`Transform`, visibility). Renderer preparation deduplicates GPU resources by shared asset
+  identity while retaining one draw submission per visible `Renderable`.
 - FetchContent dependency sources are pinned to full commits, warnings live in a project-only
   interface target, Qt is found before downloads begin, and checked-in presets make WSL and
   headless configurations repeatable.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mgv/render_backend.hpp"
+#include "mgv/scene.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -25,6 +26,7 @@ public:
 
     void load(const AssetPaths& paths);
     void load(MeshData mesh, ShaderSources shaders);
+    void set_scene(Scene scene);
     void set_camera(Camera camera);
     [[nodiscard]] Camera camera() const;
     void render(const Frame& frame);

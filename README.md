@@ -11,7 +11,9 @@ types.
 - Runtime OBJ loading with `v`, `vt`, `vn`, positive/negative indices, polygon triangulation,
   vertex deduplication, and generated normals.
 - Runtime GLSL loading with useful file, compiler, and linker diagnostics.
-- Backend-neutral `Camera`, `RenderBackend`, `MeshResource`, and `ShaderResource` APIs.
+- Backend-neutral `Scene`, `Renderable`, `Transform`, `Material`, and `Camera` APIs.
+- Shared CPU mesh/material identity mapped to deduplicated backend resources.
+- Backend-neutral `RenderBackend`, `MeshResource`, and `ShaderResource` APIs.
 - RAII ownership for windows, GL buffers, vertex arrays, shaders, and programs.
 - Pimpl façades for `Application`, `Renderer`, and `ObjLoader`.
 - Headless Catch2 tests for camera math, asset loading, and render orchestration.
@@ -107,13 +109,20 @@ Qt shell ---------\
                    -> OpenGL backend -> RenderBackend interface
 GLFW shell -------/                         |
                                              -> Renderer facade -> Camera
-ObjLoader ------> MeshData -----------------|
-ShaderLoader ---> ShaderSources ------------|
+                                                      |
+Scene -> Renderable -> Transform --------------------|
+                    -> MeshData ---------------------|
+                    -> Material -> ShaderSources ----|
 ```
 
 The CMake targets mirror these boundaries: `mgv::core`, `mgv::opengl`, and the optional Qt/GLFW
 entrypoints. A future Vulkan or Direct3D adapter can replace `mgv::opengl` without changing OBJ,
 camera, shader-file, or scene orchestration code.
+
+`Scene` objects use `std::shared_ptr<const MeshData>` and `std::shared_ptr<const Material>` so
+multiple renderables can safely share immutable assets. When a scene is submitted, `Renderer`
+creates one backend mesh/shader resource per shared object and keeps per-renderable transforms and
+visibility separate.
 
 ## Scope
 
