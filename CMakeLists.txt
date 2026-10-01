@@ -28,9 +28,16 @@ else()
     endif()
 endif()
 
+FetchContent_Declare(stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG 2c980bb59875b0d32144a71867fbdebb2f77cd20
+)
+FetchContent_MakeAvailable(stb)
+
 add_library(mgv_core
     src/camera.cpp
     src/camera_controller.cpp
+    src/image_loader.cpp
     src/material.cpp
     src/obj_loader.cpp
     src/renderer.cpp
@@ -45,6 +52,7 @@ target_include_directories(mgv_core PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include>"
 )
+target_include_directories(mgv_core SYSTEM PRIVATE "${stb_SOURCE_DIR}")
 target_link_libraries(mgv_core PRIVATE mgv::project_warnings)
 
 if(MGV_BUILD_QT_APP)
@@ -142,6 +150,7 @@ if(BUILD_TESTING)
     add_executable(mgv_tests
         tests/camera_test.cpp
         tests/camera_controller_test.cpp
+        tests/image_loader_test.cpp
         tests/obj_loader_test.cpp
         tests/renderer_test.cpp
         tests/scene_test.cpp

@@ -69,3 +69,33 @@ TEST_CASE("OBJ loader rejects a file without renderable faces") {
         mgv::ObjLoader{}.parse(obj, "empty.obj"),
         Catch::Matchers::ContainsSubstring("no renderable faces"));
 }
+
+TEST_CASE("OBJ loader imports material primitives and resolves MTL texture paths") {
+    const auto path = std::filesystem::path{MGV_TEST_FIXTURES} / "material_model" / "model.obj";
+
+    const auto model = mgv::ObjLoader{}.load_model(path);
+
+    REQUIRE(model.primitives.size() == 2);
+    REQUIRE(model.materials.size() == 2);
+    CHECK(model.primitives[0].material_index == 0);
+    CHECK(model.primitives[1].material_index == 1);
+    CHECK(model.primitives[0].mesh.indices.size() == 3);
+    CHECK(model.primitives[1].mesh.indices.size() == 3);
+    CHECK(model.materials[0].name == "Warm");
+    CHECK(model.materials[0].diffuse_color == mgv::Vec3{0.8F, 0.2F, 0.1F});
+    CHECK(model.materials[0].opacity == 1.0F);
+    REQUIRE(model.materials[0].diffuse_texture.has_value());
+    CHECK(*model.materials[0].diffuse_texture ==
+          (path.parent_path() / "textures" / "shared.ppm").lexically_normal());
+    CHECK(model.materials[1].name == "Cool");
+    CHECK(model.materials[1].opacity == 0.5F);
+    CHECK(model.materials[1].diffuse_texture == model.materials[0].diffuse_texture);
+}
+
+TEST_CASE("OBJ loader reports an unknown referenced material") {
+    const auto path = std::filesystem::path{MGV_TEST_FIXTURES} / "unknown_material.obj";
+
+    CHECK_THROWS_WITH(
+        mgv::ObjLoader{}.load_model(path),
+        Catch::Matchers::ContainsSubstring("MissingMaterial"));
+}

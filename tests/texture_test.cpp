@@ -73,3 +73,15 @@ TEST_CASE("material instance owns named texture bindings independently of its pi
     CHECK_THROWS_AS(instance.set_texture("uMissing", nullptr), std::invalid_argument);
     CHECK_THROWS_AS(mgv::MaterialInstance{nullptr}, std::invalid_argument);
 }
+
+TEST_CASE("material instance owns named color bindings") {
+    mgv::MaterialInstance instance{material()};
+
+    instance.set_color("uBaseColorFactor", {0.8F, 0.2F, 0.1F, 0.5F});
+    instance.set_color("uBaseColorFactor", {0.1F, 0.2F, 0.3F, 1.0F});
+
+    REQUIRE(instance.color_bindings().size() == 1);
+    CHECK(instance.color_bindings().front().name == "uBaseColorFactor");
+    CHECK(instance.color_bindings().front().value == mgv::Vec4{0.1F, 0.2F, 0.3F, 1.0F});
+    CHECK_THROWS_AS(instance.set_color("", {}), std::invalid_argument);
+}

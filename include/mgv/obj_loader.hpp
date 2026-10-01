@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mgv/imported_model.hpp"
 #include "mgv/mesh.hpp"
 
 #include <filesystem>
@@ -20,6 +21,7 @@ public:
     ObjLoader& operator=(const ObjLoader&) = delete;
 
     [[nodiscard]] MeshData load(const std::filesystem::path& path) const;
+    [[nodiscard]] ImportedModel load_model(const std::filesystem::path& path) const;
     [[nodiscard]] MeshData parse(std::istream& input, std::string_view source_name = "<stream>") const;
 
 private:

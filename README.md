@@ -9,7 +9,11 @@ types.
 - Qt 6 `QOpenGLWidget` entrypoint designed for WSLg/Wayland, with file pickers for OBJ and GLSL.
 - GLFW entrypoint for lightweight native use.
 - Runtime OBJ loading with `v`, `vt`, `vn`, positive/negative indices, polygon triangulation,
-  vertex deduplication, and generated normals.
+  vertex deduplication, generated normals, and material-preserving submeshes.
+- Wavefront MTL diffuse colours, opacity, and `map_Kd` textures, with paths resolved relative to
+  their MTL file and shared images decoded once per model load.
+- Runtime PNG, JPEG, TGA, BMP, PSD, GIF, HDR, PIC, PNM, and ASCII PPM image loading behind a
+  Pimpl façade; translucent materials select an alpha-blended, depth-read-only pipeline.
 - Runtime GLSL loading with useful file, compiler, and linker diagnostics.
 - Backend-neutral `Scene`, `Renderable`, `Transform`, `Material`, and `Camera` APIs.
 - Frontend-neutral orbit/zoom input through dependency-inverted `InputSink` and `CameraTarget` ports.
@@ -62,8 +66,8 @@ Use the arrow keys to orbit, `+`/`-` to zoom, and `Home` or `R` to reset the cam
 Controls menu exposes the same commands as clickable test controls. GLFW uses the same keys.
 
 The bundled cube and default shader exercise material texture binding with a generated checkerboard.
-Custom GLSL can declare `uniform sampler2D uBaseColorTexture` to consume that binding; shaders that
-omit it remain valid.
+Custom GLSL can declare `uniform sampler2D uBaseColorTexture` and
+`uniform vec4 uBaseColorFactor`; shaders that omit either binding remain valid.
 
 ## Other build configurations
 
@@ -113,7 +117,8 @@ accepted but are not automatically converted yet; they need an import transform.
 | 2        | `vec2` | texture coordinate |
 
 If declared, `uniform mat4 uMvp` receives the current model-view-projection matrix. A shader may
-omit it. Asset loads also provide an optional `sampler2D uBaseColorTexture` binding.
+omit it. Asset loads also provide optional `sampler2D uBaseColorTexture` and
+`vec4 uBaseColorFactor` bindings.
 
 ## Architecture
 
@@ -138,7 +143,8 @@ native pipeline resources.
 
 ## Scope
 
-This is intentionally an OBJ geometry viewer, not a full Wavefront material implementation.
-`mtllib`, `usemtl`, smoothing groups, and external texture image loading are ignored. The rendering
-API supports textures, but the current asset path supplies a generated checkerboard. Faces and
-geometry attributes are supported, and absent normals are generated.
+This is intentionally a focused viewer, not a complete Wavefront implementation. It supports
+`mtllib`, `usemtl`, `newmtl`, `Kd`, `d`, `Tr`, and plain `map_Kd` paths. Advanced MTL texture-map
+options, smoothing groups, illumination models, specular/normal maps, and camera-distance sorting
+of translucent primitives are not implemented. Faces and geometry attributes are supported, and
+absent normals are generated.

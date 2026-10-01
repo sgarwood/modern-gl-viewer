@@ -1,0 +1,8 @@
+newmtl Warm
+Kd 0.8 0.2 0.1
+map_Kd ../textures/shared.ppm
+
+newmtl Cool
+Kd 0.1 0.3 0.8
+d 0.5
+map_Kd ../textures/shared.ppm

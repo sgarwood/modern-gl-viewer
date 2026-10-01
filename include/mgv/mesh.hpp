@@ -20,6 +20,15 @@ struct Vec3 final {
     friend bool operator==(const Vec3&, const Vec3&) = default;
 };
 
+struct Vec4 final {
+    float x{};
+    float y{};
+    float z{};
+    float w{};
+
+    friend bool operator==(const Vec4&, const Vec4&) = default;
+};
+
 struct Vertex final {
     Vec3 position;
     Vec3 normal;

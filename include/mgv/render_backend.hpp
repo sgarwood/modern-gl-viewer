@@ -73,11 +73,17 @@ struct SampledTextureBinding final {
     const SamplerResource* sampler{};
 };
 
+struct ColorBinding final {
+    std::string name;
+    Vec4 value;
+};
+
 struct DrawPacket final {
     const MeshResource& mesh;
     const RenderPipelineResource& pipeline;
     Mat4 model_view_projection;
     std::span<const SampledTextureBinding> textures;
+    std::span<const ColorBinding> colors;
 };
 
 class RenderBackend {

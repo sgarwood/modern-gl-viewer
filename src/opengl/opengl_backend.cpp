@@ -490,6 +490,12 @@ public:
                 GL_FALSE,
                 packet.model_view_projection.data());
         }
+        for (const auto& binding : packet.colors) {
+            const auto location = glGetUniformLocation(pipeline.program(), binding.name.c_str());
+            if (location >= 0) {
+                glUniform4f(location, binding.value.x, binding.value.y, binding.value.z, binding.value.w);
+            }
+        }
         if (packet.textures.size() > max_sampled_textures_) {
             throw std::runtime_error{"Draw packet exceeds the OpenGL sampled-texture limit"};
         }

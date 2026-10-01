@@ -1,0 +1,6 @@
+mtllib model.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Broken
+f 1 2 3

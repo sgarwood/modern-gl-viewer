@@ -1,5 +1,6 @@
 #include "mgv/renderer.hpp"
 
+#include "mgv/image_loader.hpp"
 #include "mgv/obj_loader.hpp"
 #include "mgv/shader_loader.hpp"
 
@@ -69,6 +70,101 @@ namespace {
         SamplerDescriptor{.min_filter = TextureFilter::nearest, .mag_filter = TextureFilter::nearest});
 }
 
+[[nodiscard]] std::shared_ptr<const Texture> make_white_texture() {
+    return std::make_shared<const Texture>(ImageData{
+        1,
+        1,
+        PixelFormat::rgba8_unorm,
+        ColorSpace::srgb,
+        {255, 255, 255, 255},
+    });
+}
+
+[[nodiscard]] Transform fit_to_view(const ImportedModel& model) {
+    auto minimum = model.primitives.front().mesh.vertices.front().position;
+    auto maximum = minimum;
+    for (const auto& primitive : model.primitives) {
+        for (const auto& vertex : primitive.mesh.vertices) {
+            minimum.x = std::min(minimum.x, vertex.position.x);
+            minimum.y = std::min(minimum.y, vertex.position.y);
+            minimum.z = std::min(minimum.z, vertex.position.z);
+            maximum.x = std::max(maximum.x, vertex.position.x);
+            maximum.y = std::max(maximum.y, vertex.position.y);
+            maximum.z = std::max(maximum.z, vertex.position.z);
+        }
+    }
+    const Vec3 center{
+        (minimum.x + maximum.x) * 0.5F,
+        (minimum.y + maximum.y) * 0.5F,
+        (minimum.z + maximum.z) * 0.5F,
+    };
+    const auto extent = std::max({maximum.x - minimum.x, maximum.y - minimum.y, maximum.z - minimum.z});
+    const auto scale = extent > 0.0F ? 1.6F / extent : 1.0F;
+    Transform transform;
+    transform.set_uniform_scale(scale).set_position({
+        -center.x * scale,
+        -center.y * scale,
+        -center.z * scale,
+    });
+    return transform;
+}
+
+[[nodiscard]] Scene make_imported_scene(ImportedModel model, ShaderSources shaders) {
+    if (model.primitives.empty()) {
+        throw std::invalid_argument{"Cannot create an empty imported model"};
+    }
+    const auto transform = fit_to_view(model);
+    const auto material = std::make_shared<const Material>(std::move(shaders));
+    auto transparent_pipeline = material->pipeline();
+    transparent_pipeline.depth.write_enabled = false;
+    transparent_pipeline.blending.enabled = true;
+    const auto transparent_material =
+        std::make_shared<const Material>(std::move(transparent_pipeline));
+    const auto white = make_white_texture();
+    std::unordered_map<std::filesystem::path, std::shared_ptr<const Texture>> texture_cache;
+    std::vector<std::shared_ptr<const MaterialInstance>> material_instances;
+    material_instances.reserve(model.materials.size());
+    for (const auto& imported : model.materials) {
+        auto instance = std::make_shared<MaterialInstance>(
+            imported.opacity < 1.0F ? transparent_material : material);
+        instance->set_color("uBaseColorFactor", {
+            imported.diffuse_color.x,
+            imported.diffuse_color.y,
+            imported.diffuse_color.z,
+            imported.opacity,
+        });
+        std::shared_ptr<const Texture> texture = white;
+        if (imported.diffuse_texture) {
+            const auto path = imported.diffuse_texture->lexically_normal();
+            const auto existing = texture_cache.find(path);
+            if (existing != texture_cache.end()) {
+                texture = existing->second;
+            } else {
+                texture = std::make_shared<const Texture>(ImageLoader{}.load(path, ColorSpace::srgb));
+                texture_cache.emplace(path, texture);
+            }
+        }
+        instance->set_texture("uBaseColorTexture", std::move(texture));
+        material_instances.push_back(std::move(instance));
+    }
+    auto fallback = std::make_shared<MaterialInstance>(material);
+    fallback->set_color("uBaseColorFactor", {1.0F, 1.0F, 1.0F, 1.0F});
+    fallback->set_texture("uBaseColorTexture", make_checkerboard_texture());
+
+    Scene scene;
+    for (auto& primitive : model.primitives) {
+        const auto instance = primitive.material_index
+            ? material_instances.at(*primitive.material_index)
+            : std::shared_ptr<const MaterialInstance>{fallback};
+        scene.add(Renderable{
+            std::make_shared<const MeshData>(std::move(primitive.mesh)),
+            instance,
+            transform,
+        });
+    }
+    return scene;
+}
+
 [[nodiscard]] Scene make_single_renderable_scene(
     MeshData mesh,
     ShaderSources shaders,
@@ -93,6 +189,7 @@ struct GpuRenderable final {
     RenderPipelineResource* pipeline{};
     Mat4 model_matrix{};
     std::vector<SampledTextureBinding> textures;
+    std::vector<ColorBinding> colors;
     bool visible{true};
 };
 
@@ -141,10 +238,9 @@ Renderer::Renderer(Renderer&&) noexcept = default;
 Renderer& Renderer::operator=(Renderer&&) noexcept = default;
 
 void Renderer::load(const AssetPaths& paths) {
-    set_scene(make_single_renderable_scene(
-        ObjLoader{}.load(paths.model),
-        ShaderLoader::load(paths.vertex_shader, paths.fragment_shader),
-        make_checkerboard_texture()));
+    set_scene(make_imported_scene(
+        ObjLoader{}.load_model(paths.model),
+        ShaderLoader::load(paths.vertex_shader, paths.fragment_shader)));
 }
 
 void Renderer::load(MeshData mesh, ShaderSources shaders) {
@@ -225,11 +321,18 @@ void Renderer::set_scene(Scene scene) {
             });
         }
 
+        std::vector<ColorBinding> gpu_color_bindings;
+        gpu_color_bindings.reserve(renderable.material_instance()->color_bindings().size());
+        for (const auto& binding : renderable.material_instance()->color_bindings()) {
+            gpu_color_bindings.push_back({.name = binding.name, .value = binding.value});
+        }
+
         renderables.push_back({
             .mesh = gpu_mesh,
             .pipeline = gpu_pipeline,
             .model_matrix = renderable.transform().matrix(),
             .textures = std::move(gpu_texture_bindings),
+            .colors = std::move(gpu_color_bindings),
             .visible = renderable.visible(),
         });
     }
@@ -268,6 +371,7 @@ void Renderer::render(const Frame& frame) {
                 .pipeline = *renderable.pipeline,
                 .model_view_projection = multiply(view_projection, renderable.model_matrix),
                 .textures = renderable.textures,
+                .colors = renderable.colors,
             });
         }
     }

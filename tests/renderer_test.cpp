@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -26,6 +27,7 @@ struct Calls final {
     bool depth_write{};
     bool blending{};
     std::vector<std::string> texture_binding_names;
+    std::vector<mgv::Vec4> colors;
     std::vector<mgv::Mat4> transforms;
 };
 
@@ -81,6 +83,9 @@ public:
             REQUIRE(binding.sampler != nullptr);
             calls_.texture_binding_names.push_back(binding.name);
         }
+        for (const auto& binding : packet.colors) {
+            calls_.colors.push_back(binding.value);
+        }
         if (calls_.reject_draws) {
             throw std::runtime_error{"draw rejected"};
         }
@@ -117,6 +122,51 @@ TEST_CASE("renderer facade creates backend resources and submits a frame") {
     CHECK(calls.begins == 1);
     CHECK(calls.draws == 1);
     CHECK(calls.ends == 1);
+}
+
+TEST_CASE("renderer imports OBJ material primitives and reuses shared images") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    const auto fixture_root = std::filesystem::path{MGV_TEST_FIXTURES};
+
+    renderer.load({
+        .model = fixture_root / "material_model" / "model.obj",
+        .vertex_shader = fixture_root / "basic.vert",
+        .fragment_shader = fixture_root / "basic.frag",
+    });
+    renderer.render({});
+
+    CHECK(calls.meshes == 2);
+    CHECK(calls.pipelines == 2);
+    CHECK(calls.textures == 1);
+    CHECK(calls.samplers == 1);
+    CHECK(calls.draws == 2);
+    CHECK_FALSE(calls.depth_write);
+    CHECK(calls.blending);
+    CHECK(calls.colors == std::vector<mgv::Vec4>{{0.8F, 0.2F, 0.1F, 1.0F},
+                                                {0.1F, 0.3F, 0.8F, 0.5F}});
+}
+
+TEST_CASE("failed asset import leaves the previous renderer scene intact") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    mgv::MeshData mesh{
+        .vertices = {{{0, 0, 0}, {0, 0, 1}, {0, 0}},
+                     {{1, 0, 0}, {0, 0, 1}, {1, 0}},
+                     {{0, 1, 0}, {0, 0, 1}, {0, 1}}},
+        .indices = {0, 1, 2},
+    };
+    renderer.load(std::move(mesh), {"vertex", "fragment", "test.vert", "test.frag"});
+    const auto fixture_root = std::filesystem::path{MGV_TEST_FIXTURES};
+
+    CHECK_THROWS(renderer.load({
+        .model = fixture_root / "missing_texture" / "model.obj",
+        .vertex_shader = fixture_root / "basic.vert",
+        .fragment_shader = fixture_root / "basic.frag",
+    }));
+    renderer.render({});
+
+    CHECK(calls.draws == 1);
 }
 
 TEST_CASE("renderer facade refuses to render before assets are loaded") {

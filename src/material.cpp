@@ -55,12 +55,29 @@ MaterialInstance& MaterialInstance::set_texture(
     return *this;
 }
 
+MaterialInstance& MaterialInstance::set_color(std::string name, Vec4 value) {
+    if (name.empty()) {
+        throw std::invalid_argument{"Color binding name must not be empty"};
+    }
+    const auto existing = std::ranges::find(color_bindings_, name, &MaterialColorBinding::name);
+    if (existing == color_bindings_.end()) {
+        color_bindings_.push_back({std::move(name), value});
+    } else {
+        existing->value = value;
+    }
+    return *this;
+}
+
 const std::shared_ptr<const Material>& MaterialInstance::material() const noexcept {
     return material_;
 }
 
 std::span<const MaterialTextureBinding> MaterialInstance::texture_bindings() const noexcept {
     return texture_bindings_;
+}
+
+std::span<const MaterialColorBinding> MaterialInstance::color_bindings() const noexcept {
+    return color_bindings_;
 }
 
 } // namespace mgv
