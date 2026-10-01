@@ -85,7 +85,7 @@ Mat4 Camera::view_matrix() const {
     };
 }
 
-Mat4 Camera::projection_matrix(float aspect_ratio) const {
+Mat4 Camera::projection_matrix(float aspect_ratio, ClipSpaceConvention convention) const {
     if (aspect_ratio <= 0.0F) {
         throw std::invalid_argument{"Camera aspect ratio must be positive"};
     }
@@ -93,15 +93,20 @@ Mat4 Camera::projection_matrix(float aspect_ratio) const {
     const auto focal_length = 1.0F / std::tan(radians * 0.5F);
     Mat4 result{};
     result[0] = focal_length / aspect_ratio;
-    result[5] = focal_length;
-    result[10] = (far_plane_ + near_plane_) / (near_plane_ - far_plane_);
+    result[5] = convention.invert_y ? -focal_length : focal_length;
+    if (convention.depth_range == ClipDepthRange::zero_to_one) {
+        result[10] = far_plane_ / (near_plane_ - far_plane_);
+        result[14] = (far_plane_ * near_plane_) / (near_plane_ - far_plane_);
+    } else {
+        result[10] = (far_plane_ + near_plane_) / (near_plane_ - far_plane_);
+        result[14] = (2.0F * far_plane_ * near_plane_) / (near_plane_ - far_plane_);
+    }
     result[11] = -1.0F;
-    result[14] = (2.0F * far_plane_ * near_plane_) / (near_plane_ - far_plane_);
     return result;
 }
 
-Mat4 Camera::view_projection_matrix(float aspect_ratio) const {
-    return multiply(projection_matrix(aspect_ratio), view_matrix());
+Mat4 Camera::view_projection_matrix(float aspect_ratio, ClipSpaceConvention convention) const {
+    return multiply(projection_matrix(aspect_ratio, convention), view_matrix());
 }
 
 } // namespace mgv

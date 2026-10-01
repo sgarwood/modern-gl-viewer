@@ -35,6 +35,7 @@ TEST_CASE("shader loader reads custom source files at runtime") {
     CHECK(sources.fragment.find("out vec4") != std::string::npos);
     CHECK(sources.vertex_name == vertex.path().string());
     CHECK(sources.fragment_name == fragment.path().string());
+    CHECK(sources.language == mgv::ShaderSourceLanguage::glsl);
 }
 
 TEST_CASE("shader loader rejects an empty source file") {

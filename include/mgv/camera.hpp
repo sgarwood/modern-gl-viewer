@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mgv/clip_space.hpp"
 #include "mgv/mesh.hpp"
 
 #include <array>
@@ -18,8 +19,12 @@ public:
     [[nodiscard]] const Vec3& position() const noexcept;
     [[nodiscard]] const Vec3& target() const noexcept;
     [[nodiscard]] Mat4 view_matrix() const;
-    [[nodiscard]] Mat4 projection_matrix(float aspect_ratio) const;
-    [[nodiscard]] Mat4 view_projection_matrix(float aspect_ratio) const;
+    [[nodiscard]] Mat4 projection_matrix(
+        float aspect_ratio,
+        ClipSpaceConvention convention = {}) const;
+    [[nodiscard]] Mat4 view_projection_matrix(
+        float aspect_ratio,
+        ClipSpaceConvention convention = {}) const;
 
 private:
     Vec3 position_{0.0F, 0.0F, 3.0F};

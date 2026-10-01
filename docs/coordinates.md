@@ -14,8 +14,9 @@ The core uses a right-handed, Y-up world. With the default camera:
 ```
 
 `Camera` defaults to position `(0, 0, 3)`, target `(0, 0, 0)`, and up `(0, 1, 0)`. It looks along
-−Z. Its projection follows the OpenGL convention with normalized device Z in `[-1, +1]`. `Mat4`
-values are column-major for direct upload through `glUniformMatrix4fv(..., GL_FALSE, ...)`.
+−Z. Its default projection follows the OpenGL convention with normalized device Z in `[-1, +1]`.
+The render backend reports its `ClipSpaceConvention`; the camera also supports `[0, +1]` depth and
+inverted clip-space Y for APIs with different conventions. `Mat4` values are column-major.
 
 The camera is a core value type, independent of Qt, GLFW, and OpenGL:
 

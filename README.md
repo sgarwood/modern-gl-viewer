@@ -14,7 +14,9 @@ types.
 - Backend-neutral `Scene`, `Renderable`, `Transform`, `Material`, and `Camera` APIs.
 - Frontend-neutral orbit/zoom input through dependency-inverted `InputSink` and `CameraTarget` ports.
 - Shared CPU mesh/material identity mapped to deduplicated backend resources.
-- Backend-neutral `RenderBackend`, `MeshResource`, and `ShaderResource` APIs.
+- Backend-neutral `RenderBackend`, `MeshResource`, and `RenderPipelineResource` APIs.
+- Explicit topology, rasterization, depth, and blending state in immutable pipeline descriptors.
+- Backend-reported clip-space conventions, including OpenGL and zero-to-one depth ranges.
 - RAII ownership for windows, GL buffers, vertex arrays, shaders, and programs.
 - Pimpl façades for `Application`, `Renderer`, and `ObjLoader`.
 - Headless Catch2 tests for camera math, asset loading, and render orchestration.
@@ -86,8 +88,9 @@ ctest --preset headless-tests
 The renderer's canonical world is right-handed and Y-up:
 
 - +X points right, +Y points up, and the default camera sits on +Z looking toward the origin.
-- `Camera` uses a right-handed look-at view and an OpenGL perspective projection.
-- Matrices are column-major; OpenGL normalized device depth is −1 to +1.
+- `Camera` uses a right-handed look-at view and the active backend's projection convention.
+- Matrices are column-major; OpenGL selects normalized device depth of −1 to +1, while a future
+  backend can select zero-to-one depth and inverted clip-space Y.
 - OBJ positions, normals, units, and UVs are preserved as authored. OBJ files contain no standard
   metadata declaring handedness, up-axis, units, or UV origin.
 
@@ -110,8 +113,8 @@ omit it.
 
 ```text
 Qt / GLFW adapter -> InputSink <- OrbitCameraController -> CameraTarget <- Renderer -> Camera
-Qt / GLFW host    -> OpenGL backend -> RenderBackend interface <--------- Renderer
-Scene -> Renderable -> Transform / MeshData / Material -----------------> Renderer
+Qt / GLFW host    -> OpenGL backend -> RenderBackend <------------------- Renderer
+Scene -> Renderable -> Transform / MeshData / Material -> Pipeline ----> Renderer
 ```
 
 The CMake targets mirror these boundaries: `mgv::core`, `mgv::opengl`, and the optional Qt/GLFW
@@ -120,8 +123,9 @@ camera, shader-file, or scene orchestration code.
 
 `Scene` objects use `std::shared_ptr<const MeshData>` and `std::shared_ptr<const Material>` so
 multiple renderables can safely share immutable assets. When a scene is submitted, `Renderer`
-creates one backend mesh/shader resource per shared object and keeps per-renderable transforms and
-visibility separate.
+creates one backend mesh/pipeline resource per shared object and keeps per-renderable transforms
+and visibility separate. `RenderPipelineDescriptor` captures primitive topology, rasterization,
+depth, and blending state; the backend owns compilation and native pipeline resources.
 
 ## Scope
 

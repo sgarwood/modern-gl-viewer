@@ -53,9 +53,23 @@ namespace {
 
 struct GpuRenderable final {
     MeshResource* mesh{};
-    ShaderResource* shader{};
+    RenderPipelineResource* pipeline{};
     Mat4 model_matrix{};
     bool visible{true};
+};
+
+class FrameScope final {
+public:
+    FrameScope(RenderBackend& backend, const Frame& frame) : backend_{backend} {
+        backend_.begin_frame(frame);
+    }
+    ~FrameScope() { backend_.end_frame(); }
+
+    FrameScope(const FrameScope&) = delete;
+    FrameScope& operator=(const FrameScope&) = delete;
+
+private:
+    RenderBackend& backend_;
 };
 
 } // namespace
@@ -69,7 +83,7 @@ struct Renderer::Impl final {
 
     std::unique_ptr<RenderBackend> backend;
     std::vector<std::unique_ptr<MeshResource>> meshes;
-    std::vector<std::unique_ptr<ShaderResource>> shaders;
+    std::vector<std::unique_ptr<RenderPipelineResource>> pipelines;
     std::vector<GpuRenderable> renderables;
     Camera camera;
     bool scene_loaded{};
@@ -103,10 +117,10 @@ void Renderer::set_scene(Scene scene) {
     }
 
     std::vector<std::unique_ptr<MeshResource>> meshes;
-    std::vector<std::unique_ptr<ShaderResource>> shaders;
+    std::vector<std::unique_ptr<RenderPipelineResource>> pipelines;
     std::vector<GpuRenderable> renderables;
     std::unordered_map<const MeshData*, MeshResource*> mesh_cache;
-    std::unordered_map<const Material*, ShaderResource*> shader_cache;
+    std::unordered_map<const Material*, RenderPipelineResource*> pipeline_cache;
     renderables.reserve(scene.size());
 
     for (const auto& renderable : scene.renderables()) {
@@ -122,28 +136,28 @@ void Renderer::set_scene(Scene scene) {
             meshes.push_back(std::move(resource));
         }
 
-        const auto* shader_key = renderable.material().get();
-        auto* gpu_shader = shader_cache.contains(shader_key) ? shader_cache.at(shader_key) : nullptr;
-        if (gpu_shader == nullptr) {
-            auto resource = impl_->backend->create_shader(renderable.material()->shaders());
+        const auto* pipeline_key = renderable.material().get();
+        auto* gpu_pipeline = pipeline_cache.contains(pipeline_key) ? pipeline_cache.at(pipeline_key) : nullptr;
+        if (gpu_pipeline == nullptr) {
+            auto resource = impl_->backend->create_pipeline(renderable.material()->pipeline());
             if (!resource) {
-                throw std::runtime_error{"Render backend returned an empty shader resource"};
+                throw std::runtime_error{"Render backend returned an empty pipeline resource"};
             }
-            gpu_shader = resource.get();
-            shader_cache.emplace(shader_key, gpu_shader);
-            shaders.push_back(std::move(resource));
+            gpu_pipeline = resource.get();
+            pipeline_cache.emplace(pipeline_key, gpu_pipeline);
+            pipelines.push_back(std::move(resource));
         }
 
         renderables.push_back({
             .mesh = gpu_mesh,
-            .shader = gpu_shader,
+            .pipeline = gpu_pipeline,
             .model_matrix = renderable.transform().matrix(),
             .visible = renderable.visible(),
         });
     }
 
     impl_->meshes = std::move(meshes);
-    impl_->shaders = std::move(shaders);
+    impl_->pipelines = std::move(pipelines);
     impl_->renderables = std::move(renderables);
     impl_->scene_loaded = true;
 }
@@ -162,17 +176,20 @@ void Renderer::render(const Frame& frame) {
     }
     const auto aspect = static_cast<float>(frame.framebuffer_width) /
                         static_cast<float>(std::max(frame.framebuffer_height, 1));
-    const auto view_projection = impl_->camera.view_projection_matrix(std::max(aspect, 0.01F));
-    impl_->backend->begin_frame(frame);
+    const auto capabilities = impl_->backend->capabilities();
+    const auto view_projection = impl_->camera.view_projection_matrix(
+        std::max(aspect, 0.01F),
+        capabilities.clip_space);
+    const FrameScope frame_scope{*impl_->backend, frame};
     for (const auto& renderable : impl_->renderables) {
         if (renderable.visible) {
-            impl_->backend->draw(
-                *renderable.mesh,
-                *renderable.shader,
-                multiply(view_projection, renderable.model_matrix));
+            impl_->backend->draw({
+                .mesh = *renderable.mesh,
+                .pipeline = *renderable.pipeline,
+                .model_view_projection = multiply(view_projection, renderable.model_matrix),
+            });
         }
     }
-    impl_->backend->end_frame();
 }
 
 } // namespace mgv

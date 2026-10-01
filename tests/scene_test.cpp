@@ -42,7 +42,7 @@ TEST_CASE("renderable rejects missing or empty resources") {
     CHECK_THROWS_AS((mgv::Renderable{nullptr, material()}), std::invalid_argument);
     CHECK_THROWS_AS((mgv::Renderable{empty_mesh, material()}), std::invalid_argument);
     CHECK_THROWS_AS((mgv::Renderable{triangle_mesh(), nullptr}), std::invalid_argument);
-    CHECK_THROWS_AS((mgv::Material{{}}), std::invalid_argument);
+    CHECK_THROWS_AS((mgv::Material{mgv::ShaderSources{}}), std::invalid_argument);
 }
 
 TEST_CASE("renderable visibility and transform are mutable before scene submission") {

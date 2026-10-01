@@ -28,6 +28,21 @@ TEST_CASE("camera creates an OpenGL perspective projection") {
     CHECK(projection[15] == Catch::Approx(0.0F));
 }
 
+TEST_CASE("camera projection follows the backend clip-space convention") {
+    mgv::Camera camera;
+    camera.set_perspective(60.0F, 0.25F, 250.0F);
+
+    const auto opengl = camera.projection_matrix(1.0F);
+    const auto zero_to_one = camera.projection_matrix(1.0F, {
+        .depth_range = mgv::ClipDepthRange::zero_to_one,
+        .invert_y = true,
+    });
+
+    CHECK(zero_to_one[5] == Catch::Approx(-opengl[5]));
+    CHECK(zero_to_one[10] != Catch::Approx(opengl[10]));
+    CHECK(zero_to_one[14] != Catch::Approx(opengl[14]));
+}
+
 TEST_CASE("camera rejects degenerate poses and invalid projection parameters") {
     mgv::Camera camera;
 

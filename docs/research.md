@@ -1,6 +1,6 @@
 # Open-source design research
 
-Research was performed on 30 September 2026 with GitHub CLI, using repository search, metadata,
+Research was performed on 30 September–1 October 2026 with GitHub CLI, using repository search, metadata,
 source-tree inspection, and shallow clones. Representative commands:
 
 ```sh
@@ -22,7 +22,8 @@ frontend should traffic in backend-neutral descriptions and resources, while nat
 inside an implementation.
 
 Applied here: `RenderBackend` is the substitution boundary; no `GLenum`, GLuint, GLFW, or GLAD
-header leaks into `mgv_core`.
+header leaks into `mgv_core`. Immutable pipeline descriptors carry topology, rasterization, depth,
+and blending state, while `DrawPacket` is the backend-neutral submission unit.
 
 ### [Diligent Engine / DiligentCore](https://github.com/DiligentGraphics/DiligentCore)
 
@@ -33,9 +34,10 @@ and backend-owned
 resources. It demonstrates the value of separating resource creation from command submission and
 of making resources polymorphic at the API boundary.
 
-Applied here: mesh/shader creation is separate from `begin_frame`/`draw`/`end_frame`, and resources
-have abstract owning base classes. A new backend cannot accidentally receive another backend's
-native object; the OpenGL adapter checks that boundary.
+Applied here: mesh/pipeline creation is separate from `begin_frame`/`draw`/`end_frame`, and resources
+have abstract owning base classes. Backends report clip-space capabilities, and an RAII frame scope
+guarantees that every successfully begun frame ends. A new backend cannot accidentally receive
+another backend's native object; the OpenGL adapter checks that boundary.
 
 ### [globjects](https://github.com/cginternals/globjects)
 
@@ -59,7 +61,8 @@ It is a useful precedent for keeping parsing internals private and making custom
 first-class input.
 
 Applied here: `ObjLoader` presents a small filesystem/stream API backed by Pimpl, while
-`ShaderSources` is passed through the renderer without OpenGL-specific compilation concerns.
+`ShaderSources` declares its source language and travels inside a backend-neutral pipeline
+descriptor. The OpenGL adapter explicitly accepts GLSL and rejects incompatible source languages.
 
 ### [Magnum](https://github.com/mosra/magnum)
 
@@ -108,9 +111,9 @@ documented launch command explicitly selects Qt's Wayland platform plugin.
 - The project adopts ideas, not source code; no researched implementation is copied.
 - The public API uses `std::unique_ptr` ownership instead of integer handles. It is smaller and
   harder to misuse at this scale while preserving backend substitution.
-- GLSL is loaded and compiled at startup because the requested backend is OpenGL. A Vulkan or
-  Direct3D backend can interpret `ShaderSources` differently or evolve the neutral descriptor to
-  accept SPIR-V/DXIL without exposing native API types.
+- GLSL is loaded and compiled at startup because the requested backend is OpenGL. Shader source
+  language is explicit, so another backend can accept HLSL or evolve the neutral descriptor to
+  carry SPIR-V/DXIL without exposing native API types.
 - The OBJ parser is local and narrowly tested rather than adding a large scene-import dependency.
   For glTF, materials, animation, or production asset conversion, Assimp or a dedicated offline
   pipeline would be more appropriate.

@@ -169,9 +169,97 @@ private:
     GLsizei index_count_{};
 };
 
-class OpenGlShader final : public ShaderResource {
+[[nodiscard]] GLenum primitive_topology(PrimitiveTopology topology) {
+    switch (topology) {
+    case PrimitiveTopology::triangle_list:
+        return GL_TRIANGLES;
+    case PrimitiveTopology::line_list:
+        return GL_LINES;
+    case PrimitiveTopology::point_list:
+        return GL_POINTS;
+    }
+    throw std::invalid_argument{"Unsupported primitive topology"};
+}
+
+[[nodiscard]] GLenum cull_face(CullMode mode) {
+    switch (mode) {
+    case CullMode::front:
+        return GL_FRONT;
+    case CullMode::back:
+        return GL_BACK;
+    case CullMode::none:
+        break;
+    }
+    throw std::invalid_argument{"Cull face requested for disabled culling"};
+}
+
+[[nodiscard]] GLenum front_face(FrontFace face) {
+    switch (face) {
+    case FrontFace::counter_clockwise:
+        return GL_CCW;
+    case FrontFace::clockwise:
+        return GL_CW;
+    }
+    throw std::invalid_argument{"Unsupported front-face winding"};
+}
+
+[[nodiscard]] GLenum polygon_mode(PolygonMode mode) {
+    switch (mode) {
+    case PolygonMode::fill:
+        return GL_FILL;
+    case PolygonMode::line:
+        return GL_LINE;
+    }
+    throw std::invalid_argument{"Unsupported polygon mode"};
+}
+
+[[nodiscard]] GLenum compare_operation(CompareOperation operation) {
+    switch (operation) {
+    case CompareOperation::never:
+        return GL_NEVER;
+    case CompareOperation::less:
+        return GL_LESS;
+    case CompareOperation::equal:
+        return GL_EQUAL;
+    case CompareOperation::less_or_equal:
+        return GL_LEQUAL;
+    case CompareOperation::greater:
+        return GL_GREATER;
+    case CompareOperation::not_equal:
+        return GL_NOTEQUAL;
+    case CompareOperation::greater_or_equal:
+        return GL_GEQUAL;
+    case CompareOperation::always:
+        return GL_ALWAYS;
+    }
+    throw std::invalid_argument{"Unsupported comparison operation"};
+}
+
+[[nodiscard]] GLenum blend_factor(BlendFactor factor) {
+    switch (factor) {
+    case BlendFactor::zero:
+        return GL_ZERO;
+    case BlendFactor::one:
+        return GL_ONE;
+    case BlendFactor::source_alpha:
+        return GL_SRC_ALPHA;
+    case BlendFactor::one_minus_source_alpha:
+        return GL_ONE_MINUS_SRC_ALPHA;
+    }
+    throw std::invalid_argument{"Unsupported blend factor"};
+}
+
+class OpenGlPipeline final : public RenderPipelineResource {
 public:
-    explicit OpenGlShader(const ShaderSources& sources) {
+    explicit OpenGlPipeline(const RenderPipelineDescriptor& descriptor)
+        : topology_{descriptor.topology},
+          rasterization_{descriptor.rasterization},
+          depth_{descriptor.depth},
+          blending_{descriptor.blending} {
+        const auto& sources = descriptor.shaders;
+        if (sources.language != ShaderSourceLanguage::glsl) {
+            throw std::invalid_argument{"OpenGL backend requires GLSL shader source"};
+        }
         const auto vertex = compile_shader(GL_VERTEX_SHADER, sources.vertex, sources.vertex_name);
         const auto fragment = compile_shader(GL_FRAGMENT_SHADER, sources.fragment, sources.fragment_name);
         glAttachShader(program_.get(), vertex.get());
@@ -187,10 +275,18 @@ public:
 
     [[nodiscard]] GLuint program() const noexcept { return program_.get(); }
     [[nodiscard]] GLint mvp_location() const noexcept { return mvp_location_; }
+    [[nodiscard]] PrimitiveTopology topology() const noexcept { return topology_; }
+    [[nodiscard]] const RasterizationState& rasterization() const noexcept { return rasterization_; }
+    [[nodiscard]] const DepthState& depth() const noexcept { return depth_; }
+    [[nodiscard]] const BlendState& blending() const noexcept { return blending_; }
 
 private:
     Program program_;
     GLint mvp_location_{-1};
+    PrimitiveTopology topology_;
+    RasterizationState rasterization_;
+    DepthState depth_;
+    BlendState blending_;
 };
 
 template <typename Target>
@@ -204,34 +300,77 @@ template <typename Target>
 
 class OpenGlBackend final : public RenderBackend {
 public:
+    [[nodiscard]] RenderBackendCapabilities capabilities() const noexcept override {
+        return {
+            .clip_space = {},
+            .wireframe = true,
+        };
+    }
+
     std::unique_ptr<MeshResource> create_mesh(const MeshData& mesh) override {
         return std::make_unique<OpenGlMesh>(mesh);
     }
 
-    std::unique_ptr<ShaderResource> create_shader(const ShaderSources& sources) override {
-        return std::make_unique<OpenGlShader>(sources);
+    std::unique_ptr<RenderPipelineResource> create_pipeline(
+        const RenderPipelineDescriptor& descriptor) override {
+        return std::make_unique<OpenGlPipeline>(descriptor);
     }
 
     void begin_frame(const Frame& frame) override {
         glViewport(0, 0, frame.framebuffer_width, frame.framebuffer_height);
-        glEnable(GL_DEPTH_TEST);
+        glDepthMask(GL_TRUE);
         glClearColor(0.025F, 0.035F, 0.055F, 1.0F);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     }
 
-    void draw(const MeshResource& mesh, const ShaderResource& shader, const Mat4& transform) override {
-        const auto& gl_mesh = backend_resource<OpenGlMesh>(mesh, "mesh");
-        const auto& gl_shader = backend_resource<OpenGlShader>(shader, "shader");
-        glUseProgram(gl_shader.program());
-        if (gl_shader.mvp_location() >= 0) {
-            glUniformMatrix4fv(gl_shader.mvp_location(), 1, GL_FALSE, transform.data());
+    void draw(const DrawPacket& packet) override {
+        const auto& gl_mesh = backend_resource<OpenGlMesh>(packet.mesh, "mesh");
+        const auto& pipeline = backend_resource<OpenGlPipeline>(packet.pipeline, "pipeline");
+
+        if (pipeline.depth().test_enabled) {
+            glEnable(GL_DEPTH_TEST);
+        } else {
+            glDisable(GL_DEPTH_TEST);
+        }
+        glDepthMask(pipeline.depth().write_enabled ? GL_TRUE : GL_FALSE);
+        glDepthFunc(compare_operation(pipeline.depth().compare));
+
+        if (pipeline.rasterization().cull_mode == CullMode::none) {
+            glDisable(GL_CULL_FACE);
+        } else {
+            glEnable(GL_CULL_FACE);
+            glCullFace(cull_face(pipeline.rasterization().cull_mode));
+        }
+        glFrontFace(front_face(pipeline.rasterization().front_face));
+        glPolygonMode(GL_FRONT_AND_BACK, polygon_mode(pipeline.rasterization().polygon_mode));
+
+        if (pipeline.blending().enabled) {
+            glEnable(GL_BLEND);
+            glBlendFunc(
+                blend_factor(pipeline.blending().source),
+                blend_factor(pipeline.blending().destination));
+        } else {
+            glDisable(GL_BLEND);
+        }
+
+        glUseProgram(pipeline.program());
+        if (pipeline.mvp_location() >= 0) {
+            glUniformMatrix4fv(
+                pipeline.mvp_location(),
+                1,
+                GL_FALSE,
+                packet.model_view_projection.data());
         }
         glBindVertexArray(gl_mesh.vertex_array());
-        glDrawElements(GL_TRIANGLES, gl_mesh.index_count(), GL_UNSIGNED_INT, nullptr);
+        glDrawElements(
+            primitive_topology(pipeline.topology()),
+            gl_mesh.index_count(),
+            GL_UNSIGNED_INT,
+            nullptr);
         glBindVertexArray(0);
     }
 
-    void end_frame() override {}
+    void end_frame() noexcept override {}
 };
 
 } // namespace
