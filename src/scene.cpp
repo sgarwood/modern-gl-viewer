@@ -7,7 +7,7 @@ namespace mgv {
 
 Renderable::Renderable(
     std::shared_ptr<const MeshData> mesh,
-    std::shared_ptr<const Material> material,
+    std::shared_ptr<const MaterialInstance> material,
     Transform transform)
     : mesh_{std::move(mesh)}, material_{std::move(material)}, transform_{std::move(transform)} {
     if (!mesh_ || mesh_->empty()) {
@@ -19,7 +19,9 @@ Renderable::Renderable(
 }
 
 const std::shared_ptr<const MeshData>& Renderable::mesh() const noexcept { return mesh_; }
-const std::shared_ptr<const Material>& Renderable::material() const noexcept { return material_; }
+const std::shared_ptr<const MaterialInstance>& Renderable::material_instance() const noexcept {
+    return material_;
+}
 const Transform& Renderable::transform() const noexcept { return transform_; }
 bool Renderable::visible() const noexcept { return visible_; }
 

@@ -1,5 +1,6 @@
 #include "mgv/material.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
@@ -26,6 +27,40 @@ const ShaderSources& Material::shaders() const noexcept {
 
 const RenderPipelineDescriptor& Material::pipeline() const noexcept {
     return pipeline_;
+}
+
+MaterialInstance::MaterialInstance(std::shared_ptr<const Material> material)
+    : material_{std::move(material)} {
+    if (!material_) {
+        throw std::invalid_argument{"Material instance requires a material"};
+    }
+}
+
+MaterialInstance& MaterialInstance::set_texture(
+    std::string name,
+    std::shared_ptr<const Texture> texture) {
+    if (name.empty()) {
+        throw std::invalid_argument{"Texture binding name must not be empty"};
+    }
+    if (!texture) {
+        throw std::invalid_argument{"Texture binding requires a texture"};
+    }
+
+    const auto existing = std::ranges::find(texture_bindings_, name, &MaterialTextureBinding::name);
+    if (existing == texture_bindings_.end()) {
+        texture_bindings_.push_back({std::move(name), std::move(texture)});
+    } else {
+        existing->texture = std::move(texture);
+    }
+    return *this;
+}
+
+const std::shared_ptr<const Material>& MaterialInstance::material() const noexcept {
+    return material_;
+}
+
+std::span<const MaterialTextureBinding> MaterialInstance::texture_bindings() const noexcept {
+    return texture_bindings_;
 }
 
 } // namespace mgv

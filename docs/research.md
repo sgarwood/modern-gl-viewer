@@ -39,6 +39,10 @@ have abstract owning base classes. Backends report clip-space capabilities, and 
 guarantees that every successfully begun frame ends. A new backend cannot accidentally receive
 another backend's native object; the OpenGL adapter checks that boundary.
 
+The same boundary now covers distinct texture and sampler resources. `MaterialInstance` owns named
+bindings while `Material` remains immutable pipeline state, matching the material/material-instance
+split used by larger renderers without importing their entity or resource-manager machinery.
+
 ### [globjects](https://github.com/cginternals/globjects)
 
 A focused C++ wrapper over OpenGL. Its
@@ -121,8 +125,9 @@ documented launch command explicitly selects Qt's Wayland platform plugin.
   procedure loader, allowing Qt and GLFW to share the exact backend without either depending on
   the other.
 - The scene layer separates immutable shared assets (`MeshData`, `Material`) from per-instance
-  state (`Transform`, visibility). Renderer preparation deduplicates GPU resources by shared asset
-  identity while retaining one draw submission per visible `Renderable`.
+  state (`MaterialInstance`, `Transform`, visibility). Renderer preparation deduplicates mesh,
+  pipeline, texture, and sampler GPU resources by shared asset identity while retaining one draw
+  submission per visible `Renderable`.
 - FetchContent dependency sources are pinned to full commits, warnings live in a project-only
   interface target, Qt is found before downloads begin, and checked-in presets make WSL and
   headless configurations repeatable.

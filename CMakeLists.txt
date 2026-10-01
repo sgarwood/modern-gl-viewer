@@ -36,6 +36,7 @@ add_library(mgv_core
     src/renderer.cpp
     src/scene.cpp
     src/shader_loader.cpp
+    src/texture.cpp
     src/transform.cpp
 )
 add_library(mgv::core ALIAS mgv_core)
@@ -145,6 +146,7 @@ if(BUILD_TESTING)
         tests/renderer_test.cpp
         tests/scene_test.cpp
         tests/shader_loader_test.cpp
+        tests/texture_test.cpp
         tests/transform_test.cpp
     )
     target_compile_features(mgv_tests PRIVATE cxx_std_20)

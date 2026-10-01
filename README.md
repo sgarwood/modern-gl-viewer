@@ -17,6 +17,8 @@ types.
 - Backend-neutral `RenderBackend`, `MeshResource`, and `RenderPipelineResource` APIs.
 - Explicit topology, rasterization, depth, and blending state in immutable pipeline descriptors.
 - Backend-reported clip-space conventions, including OpenGL and zero-to-one depth ranges.
+- Validated RGBA8 image data, linear/sRGB colour spaces, sampler descriptions, and RAII texture resources.
+- `MaterialInstance` keeps named texture bindings separate from immutable material pipelines.
 - RAII ownership for windows, GL buffers, vertex arrays, shaders, and programs.
 - Pimpl façades for `Application`, `Renderer`, and `ObjLoader`.
 - Headless Catch2 tests for camera math, asset loading, and render orchestration.
@@ -58,6 +60,10 @@ QT_QPA_PLATFORM=wayland LIBGL_ALWAYS_SOFTWARE=1 ./build/wsl-qt/mgv_qt
 
 Use the arrow keys to orbit, `+`/`-` to zoom, and `Home` or `R` to reset the camera. The Qt
 Controls menu exposes the same commands as clickable test controls. GLFW uses the same keys.
+
+The bundled cube and default shader exercise material texture binding with a generated checkerboard.
+Custom GLSL can declare `uniform sampler2D uBaseColorTexture` to consume that binding; shaders that
+omit it remain valid.
 
 ## Other build configurations
 
@@ -107,28 +113,32 @@ accepted but are not automatically converted yet; they need an import transform.
 | 2        | `vec2` | texture coordinate |
 
 If declared, `uniform mat4 uMvp` receives the current model-view-projection matrix. A shader may
-omit it.
+omit it. Asset loads also provide an optional `sampler2D uBaseColorTexture` binding.
 
 ## Architecture
 
 ```text
 Qt / GLFW adapter -> InputSink <- OrbitCameraController -> CameraTarget <- Renderer -> Camera
 Qt / GLFW host    -> OpenGL backend -> RenderBackend <------------------- Renderer
-Scene -> Renderable -> Transform / MeshData / Material -> Pipeline ----> Renderer
+Scene -> Renderable -> Transform / MeshData / MaterialInstance --------> Renderer
+                                      |-> Material -> Pipeline
+                                      |-> Texture -> Image / Sampler
 ```
 
 The CMake targets mirror these boundaries: `mgv::core`, `mgv::opengl`, and the optional Qt/GLFW
 entrypoints. A future Vulkan or Direct3D adapter can replace `mgv::opengl` without changing OBJ,
 camera, shader-file, or scene orchestration code.
 
-`Scene` objects use `std::shared_ptr<const MeshData>` and `std::shared_ptr<const Material>` so
-multiple renderables can safely share immutable assets. When a scene is submitted, `Renderer`
-creates one backend mesh/pipeline resource per shared object and keeps per-renderable transforms
-and visibility separate. `RenderPipelineDescriptor` captures primitive topology, rasterization,
-depth, and blending state; the backend owns compilation and native pipeline resources.
+`Scene` objects use shared immutable meshes, material pipelines, and textures. A `MaterialInstance`
+contains per-material named bindings without duplicating pipeline state. When a scene is submitted,
+`Renderer` deduplicates backend mesh, pipeline, texture, and sampler resources by shared identity and
+keeps per-renderable transforms and visibility separate. `RenderPipelineDescriptor` captures
+primitive topology, rasterization, depth, and blending state; the backend owns compilation and
+native pipeline resources.
 
 ## Scope
 
 This is intentionally an OBJ geometry viewer, not a full Wavefront material implementation.
-`mtllib`, `usemtl`, smoothing groups, and texture image loading are ignored. Faces and geometry
-attributes are supported, and absent normals are generated.
+`mtllib`, `usemtl`, smoothing groups, and external texture image loading are ignored. The rendering
+API supports textures, but the current asset path supplies a generated checkerboard. Faces and
+geometry attributes are supported, and absent normals are generated.

@@ -14,11 +14,11 @@ class Renderable final {
 public:
     Renderable(
         std::shared_ptr<const MeshData> mesh,
-        std::shared_ptr<const Material> material,
+        std::shared_ptr<const MaterialInstance> material,
         Transform transform = {});
 
     [[nodiscard]] const std::shared_ptr<const MeshData>& mesh() const noexcept;
-    [[nodiscard]] const std::shared_ptr<const Material>& material() const noexcept;
+    [[nodiscard]] const std::shared_ptr<const MaterialInstance>& material_instance() const noexcept;
     [[nodiscard]] const Transform& transform() const noexcept;
     [[nodiscard]] bool visible() const noexcept;
 
@@ -27,7 +27,7 @@ public:
 
 private:
     std::shared_ptr<const MeshData> mesh_;
-    std::shared_ptr<const Material> material_;
+    std::shared_ptr<const MaterialInstance> material_;
     Transform transform_;
     bool visible_{true};
 };

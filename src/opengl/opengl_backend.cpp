@@ -95,6 +95,46 @@ private:
     GLuint name_{};
 };
 
+class TextureName final {
+public:
+    TextureName() { glGenTextures(1, &name_); }
+    ~TextureName() { glDeleteTextures(1, &name_); }
+    TextureName(TextureName&& other) noexcept : name_{std::exchange(other.name_, 0)} {}
+    TextureName& operator=(TextureName&& other) noexcept {
+        if (this != &other) {
+            glDeleteTextures(1, &name_);
+            name_ = std::exchange(other.name_, 0);
+        }
+        return *this;
+    }
+    TextureName(const TextureName&) = delete;
+    TextureName& operator=(const TextureName&) = delete;
+    [[nodiscard]] GLuint get() const noexcept { return name_; }
+
+private:
+    GLuint name_{};
+};
+
+class SamplerName final {
+public:
+    SamplerName() { glGenSamplers(1, &name_); }
+    ~SamplerName() { glDeleteSamplers(1, &name_); }
+    SamplerName(SamplerName&& other) noexcept : name_{std::exchange(other.name_, 0)} {}
+    SamplerName& operator=(SamplerName&& other) noexcept {
+        if (this != &other) {
+            glDeleteSamplers(1, &name_);
+            name_ = std::exchange(other.name_, 0);
+        }
+        return *this;
+    }
+    SamplerName(const SamplerName&) = delete;
+    SamplerName& operator=(const SamplerName&) = delete;
+    [[nodiscard]] GLuint get() const noexcept { return name_; }
+
+private:
+    GLuint name_{};
+};
+
 [[nodiscard]] std::string shader_log(GLuint shader) {
     GLint length{};
     glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
@@ -249,6 +289,77 @@ private:
     throw std::invalid_argument{"Unsupported blend factor"};
 }
 
+[[nodiscard]] GLenum texture_filter(TextureFilter filter) {
+    switch (filter) {
+    case TextureFilter::nearest:
+        return GL_NEAREST;
+    case TextureFilter::linear:
+        return GL_LINEAR;
+    }
+    throw std::invalid_argument{"Unsupported texture filter"};
+}
+
+[[nodiscard]] GLenum texture_address_mode(TextureAddressMode mode) {
+    switch (mode) {
+    case TextureAddressMode::repeat:
+        return GL_REPEAT;
+    case TextureAddressMode::mirrored_repeat:
+        return GL_MIRRORED_REPEAT;
+    case TextureAddressMode::clamp_to_edge:
+        return GL_CLAMP_TO_EDGE;
+    }
+    throw std::invalid_argument{"Unsupported texture address mode"};
+}
+
+[[nodiscard]] GLsizei texture_dimension(std::uint32_t dimension) {
+    if (dimension > static_cast<std::uint32_t>(std::numeric_limits<GLsizei>::max())) {
+        throw std::overflow_error{"Texture dimension exceeds the OpenGL limit"};
+    }
+    return static_cast<GLsizei>(dimension);
+}
+
+class OpenGlTexture final : public TextureResource {
+public:
+    explicit OpenGlTexture(const ImageData& image) {
+        if (image.format() != PixelFormat::rgba8_unorm) {
+            throw std::invalid_argument{"OpenGL backend received an unsupported pixel format"};
+        }
+        const auto internal_format = image.color_space() == ColorSpace::srgb ? GL_SRGB8_ALPHA8 : GL_RGBA8;
+        glBindTexture(GL_TEXTURE_2D, name_.get());
+        glTexImage2D(
+            GL_TEXTURE_2D,
+            0,
+            internal_format,
+            texture_dimension(image.width()),
+            texture_dimension(image.height()),
+            0,
+            GL_RGBA,
+            GL_UNSIGNED_BYTE,
+            image.pixels().data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    [[nodiscard]] GLuint name() const noexcept { return name_.get(); }
+
+private:
+    TextureName name_;
+};
+
+class OpenGlSampler final : public SamplerResource {
+public:
+    explicit OpenGlSampler(const SamplerDescriptor& descriptor) {
+        glSamplerParameteri(name_.get(), GL_TEXTURE_MIN_FILTER, static_cast<GLint>(texture_filter(descriptor.min_filter)));
+        glSamplerParameteri(name_.get(), GL_TEXTURE_MAG_FILTER, static_cast<GLint>(texture_filter(descriptor.mag_filter)));
+        glSamplerParameteri(name_.get(), GL_TEXTURE_WRAP_S, static_cast<GLint>(texture_address_mode(descriptor.address_u)));
+        glSamplerParameteri(name_.get(), GL_TEXTURE_WRAP_T, static_cast<GLint>(texture_address_mode(descriptor.address_v)));
+    }
+
+    [[nodiscard]] GLuint name() const noexcept { return name_.get(); }
+
+private:
+    SamplerName name_;
+};
+
 class OpenGlPipeline final : public RenderPipelineResource {
 public:
     explicit OpenGlPipeline(const RenderPipelineDescriptor& descriptor)
@@ -300,10 +411,20 @@ template <typename Target>
 
 class OpenGlBackend final : public RenderBackend {
 public:
+    OpenGlBackend() {
+        GLint vertex_units{};
+        GLint fragment_units{};
+        glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, &vertex_units);
+        glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &fragment_units);
+        const auto units = std::min(vertex_units, fragment_units);
+        max_sampled_textures_ = units > 0 ? static_cast<std::uint32_t>(units) : 0;
+    }
+
     [[nodiscard]] RenderBackendCapabilities capabilities() const noexcept override {
         return {
             .clip_space = {},
             .wireframe = true,
+            .max_sampled_textures = max_sampled_textures_,
         };
     }
 
@@ -314,6 +435,14 @@ public:
     std::unique_ptr<RenderPipelineResource> create_pipeline(
         const RenderPipelineDescriptor& descriptor) override {
         return std::make_unique<OpenGlPipeline>(descriptor);
+    }
+
+    std::unique_ptr<TextureResource> create_texture(const ImageData& image) override {
+        return std::make_unique<OpenGlTexture>(image);
+    }
+
+    std::unique_ptr<SamplerResource> create_sampler(const SamplerDescriptor& descriptor) override {
+        return std::make_unique<OpenGlSampler>(descriptor);
     }
 
     void begin_frame(const Frame& frame) override {
@@ -361,6 +490,25 @@ public:
                 GL_FALSE,
                 packet.model_view_projection.data());
         }
+        if (packet.textures.size() > max_sampled_textures_) {
+            throw std::runtime_error{"Draw packet exceeds the OpenGL sampled-texture limit"};
+        }
+        for (std::size_t index = 0; index < packet.textures.size(); ++index) {
+            const auto& binding = packet.textures[index];
+            if (binding.texture == nullptr || binding.sampler == nullptr) {
+                throw std::invalid_argument{"Draw packet contains an empty texture binding"};
+            }
+            const auto& texture = backend_resource<OpenGlTexture>(*binding.texture, "texture");
+            const auto& sampler = backend_resource<OpenGlSampler>(*binding.sampler, "sampler");
+            const auto unit = static_cast<GLenum>(index);
+            glActiveTexture(GL_TEXTURE0 + unit);
+            glBindTexture(GL_TEXTURE_2D, texture.name());
+            glBindSampler(static_cast<GLuint>(index), sampler.name());
+            const auto location = glGetUniformLocation(pipeline.program(), binding.name.c_str());
+            if (location >= 0) {
+                glUniform1i(location, static_cast<GLint>(index));
+            }
+        }
         glBindVertexArray(gl_mesh.vertex_array());
         glDrawElements(
             primitive_topology(pipeline.topology()),
@@ -368,9 +516,18 @@ public:
             GL_UNSIGNED_INT,
             nullptr);
         glBindVertexArray(0);
+        for (std::size_t index = 0; index < packet.textures.size(); ++index) {
+            glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(index));
+            glBindSampler(static_cast<GLuint>(index), 0);
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
+        glActiveTexture(GL_TEXTURE0);
     }
 
     void end_frame() noexcept override {}
+
+private:
+    std::uint32_t max_sampled_textures_{};
 };
 
 } // namespace

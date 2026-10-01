@@ -11,22 +11,28 @@ namespace {
 struct Calls final {
     int meshes{};
     int pipelines{};
+    int textures{};
+    int samplers{};
     int begins{};
     int draws{};
     int ends{};
     bool reject_pipelines{};
     bool reject_draws{};
+    bool reject_samplers{};
     mgv::PrimitiveTopology topology{mgv::PrimitiveTopology::triangle_list};
     mgv::CullMode cull_mode{mgv::CullMode::none};
     mgv::PolygonMode polygon_mode{mgv::PolygonMode::fill};
     mgv::CompareOperation depth_compare{mgv::CompareOperation::less};
     bool depth_write{};
     bool blending{};
+    std::vector<std::string> texture_binding_names;
     std::vector<mgv::Mat4> transforms;
 };
 
 class FakeMesh final : public mgv::MeshResource {};
 class FakePipeline final : public mgv::RenderPipelineResource {};
+class FakeTexture final : public mgv::TextureResource {};
+class FakeSampler final : public mgv::SamplerResource {};
 
 class FakeBackend final : public mgv::RenderBackend {
 public:
@@ -55,10 +61,26 @@ public:
         }
         return std::make_unique<FakePipeline>();
     }
+    std::unique_ptr<mgv::TextureResource> create_texture(const mgv::ImageData&) override {
+        ++calls_.textures;
+        return std::make_unique<FakeTexture>();
+    }
+    std::unique_ptr<mgv::SamplerResource> create_sampler(const mgv::SamplerDescriptor&) override {
+        ++calls_.samplers;
+        if (calls_.reject_samplers) {
+            return nullptr;
+        }
+        return std::make_unique<FakeSampler>();
+    }
     void begin_frame(const mgv::Frame&) override { ++calls_.begins; }
     void draw(const mgv::DrawPacket& packet) override {
         ++calls_.draws;
         calls_.transforms.push_back(packet.model_view_projection);
+        for (const auto& binding : packet.textures) {
+            REQUIRE(binding.texture != nullptr);
+            REQUIRE(binding.sampler != nullptr);
+            calls_.texture_binding_names.push_back(binding.name);
+        }
         if (calls_.reject_draws) {
             throw std::runtime_error{"draw rejected"};
         }
@@ -143,12 +165,13 @@ TEST_CASE("renderer submits every visible scene object and reuses shared GPU res
     });
     const auto material = std::make_shared<const mgv::Material>(
         mgv::ShaderSources{"vertex", "fragment", "test.vert", "test.frag"});
+    const auto material_instance = std::make_shared<const mgv::MaterialInstance>(material);
     mgv::Transform moved;
     moved.set_position({2.0F, 0.0F, 0.0F});
     mgv::Scene scene;
-    scene.add(mgv::Renderable{mesh, material});
-    scene.add(mgv::Renderable{mesh, material, moved});
-    scene.add(mgv::Renderable{mesh, material}.set_visible(false));
+    scene.add(mgv::Renderable{mesh, material_instance});
+    scene.add(mgv::Renderable{mesh, material_instance, moved});
+    scene.add(mgv::Renderable{mesh, material_instance}.set_visible(false));
 
     renderer.set_scene(std::move(scene));
     renderer.render({.framebuffer_width = 800, .framebuffer_height = 600});
@@ -195,8 +218,9 @@ TEST_CASE("renderer creates explicit material pipeline state") {
         },
         .blending = {.enabled = true},
     });
+    const auto material_instance = std::make_shared<const mgv::MaterialInstance>(material);
     mgv::Scene scene;
-    scene.add(mgv::Renderable{mesh, material});
+    scene.add(mgv::Renderable{mesh, material_instance});
 
     renderer.set_scene(std::move(scene));
 
@@ -207,6 +231,75 @@ TEST_CASE("renderer creates explicit material pipeline state") {
     CHECK(calls.depth_compare == mgv::CompareOperation::less_or_equal);
     CHECK_FALSE(calls.depth_write);
     CHECK(calls.blending);
+}
+
+TEST_CASE("renderer binds and deduplicates shared textures") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    const auto mesh = std::make_shared<const mgv::MeshData>(mgv::MeshData{
+        .vertices = {{{0, 0, 0}, {0, 0, 1}, {0, 0}},
+                     {{1, 0, 0}, {0, 0, 1}, {1, 0}},
+                     {{0, 1, 0}, {0, 0, 1}, {0, 1}}},
+        .indices = {0, 1, 2},
+    });
+    const auto material = std::make_shared<const mgv::Material>(
+        mgv::ShaderSources{"vertex", "fragment", "test.vert", "test.frag"});
+    const auto texture = std::make_shared<const mgv::Texture>(mgv::ImageData{
+        1,
+        1,
+        mgv::PixelFormat::rgba8_unorm,
+        mgv::ColorSpace::srgb,
+        {10, 20, 30, 255},
+    });
+    auto first = std::make_shared<mgv::MaterialInstance>(material);
+    auto second = std::make_shared<mgv::MaterialInstance>(material);
+    first->set_texture("uBaseColorTexture", texture);
+    second->set_texture("uBaseColorTexture", texture);
+    mgv::Scene scene;
+    scene.add(mgv::Renderable{mesh, first});
+    scene.add(mgv::Renderable{mesh, second});
+
+    renderer.set_scene(std::move(scene));
+    renderer.render({});
+
+    CHECK(calls.pipelines == 1);
+    CHECK(calls.textures == 1);
+    CHECK(calls.samplers == 1);
+    CHECK(calls.draws == 2);
+    CHECK(calls.texture_binding_names ==
+          std::vector<std::string>{"uBaseColorTexture", "uBaseColorTexture"});
+}
+
+TEST_CASE("failed sampler preparation leaves the previous scene renderable") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    mgv::MeshData mesh{
+        .vertices = {{{0, 0, 0}, {0, 0, 1}, {0, 0}},
+                     {{1, 0, 0}, {0, 0, 1}, {1, 0}},
+                     {{0, 1, 0}, {0, 0, 1}, {0, 1}}},
+        .indices = {0, 1, 2},
+    };
+    renderer.load(mesh, {"vertex", "fragment", "initial.vert", "initial.frag"});
+    const auto material = std::make_shared<const mgv::Material>(
+        mgv::ShaderSources{"vertex", "fragment", "test.vert", "test.frag"});
+    auto instance = std::make_shared<mgv::MaterialInstance>(material);
+    instance->set_texture("uBaseColorTexture", std::make_shared<const mgv::Texture>(mgv::ImageData{
+                                                    1,
+                                                    1,
+                                                    mgv::PixelFormat::rgba8_unorm,
+                                                    mgv::ColorSpace::linear,
+                                                    {255, 255, 255, 255},
+                                                }));
+    mgv::Scene replacement;
+    replacement.add(mgv::Renderable{std::make_shared<const mgv::MeshData>(mesh), instance});
+    calls.reject_samplers = true;
+
+    CHECK_THROWS(renderer.set_scene(std::move(replacement)));
+    calls.reject_samplers = false;
+    renderer.render({});
+
+    CHECK(calls.draws == 1);
+    CHECK(calls.texture_binding_names.empty());
 }
 
 TEST_CASE("renderer uses the backend clip-space convention") {
@@ -261,8 +354,9 @@ TEST_CASE("failed scene preparation leaves the previous scene renderable") {
     mgv::Scene replacement;
     replacement.add(mgv::Renderable{
         std::make_shared<const mgv::MeshData>(mesh),
-        std::make_shared<const mgv::Material>(
-            mgv::ShaderSources{"new vertex", "new fragment", "new.vert", "new.frag"})});
+        std::make_shared<const mgv::MaterialInstance>(
+            std::make_shared<const mgv::Material>(
+                mgv::ShaderSources{"new vertex", "new fragment", "new.vert", "new.frag"}))});
     calls.reject_pipelines = true;
 
     CHECK_THROWS(renderer.set_scene(std::move(replacement)));

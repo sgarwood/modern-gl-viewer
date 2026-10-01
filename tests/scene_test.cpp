@@ -16,9 +16,10 @@ namespace {
     });
 }
 
-[[nodiscard]] std::shared_ptr<const mgv::Material> material() {
-    return std::make_shared<const mgv::Material>(
-        mgv::ShaderSources{"vertex", "fragment", "test.vert", "test.frag"});
+[[nodiscard]] std::shared_ptr<const mgv::MaterialInstance> material() {
+    return std::make_shared<const mgv::MaterialInstance>(
+        std::make_shared<const mgv::Material>(
+            mgv::ShaderSources{"vertex", "fragment", "test.vert", "test.frag"}));
 }
 
 } // namespace
