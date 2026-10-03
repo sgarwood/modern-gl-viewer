@@ -38,6 +38,7 @@ public:
     void load(const AssetPaths& paths);
     void load(MeshData mesh, ShaderSources shaders);
     void set_scene(Scene scene);
+    void set_renderable_transform(std::size_t index, Transform transform);
     void set_camera(Camera camera) override;
     [[nodiscard]] Camera camera() const override;
     void render(const Frame& frame);

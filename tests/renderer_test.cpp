@@ -275,6 +275,29 @@ TEST_CASE("renderer culls objects outside the camera frustum") {
                                                });
 }
 
+TEST_CASE("renderer updates a transform without recreating backend resources") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    mgv::MeshData mesh{
+        .vertices = {{{-0.5F, -0.5F, 0.0F}, {}, {}},
+                     {{0.5F, -0.5F, 0.0F}, {}, {}},
+                     {{0.0F, 0.5F, 0.0F}, {}, {}}},
+        .indices = {0, 1, 2},
+    };
+    renderer.load(std::move(mesh), {"vertex", "fragment", "test.vert", "test.frag"});
+    mgv::Transform outside;
+    outside.set_position({100.0F, 0.0F, 0.0F});
+
+    renderer.set_renderable_transform(0, outside);
+    renderer.render({});
+
+    CHECK(calls.meshes == 1);
+    CHECK(calls.pipelines == 1);
+    CHECK(calls.draws == 0);
+    CHECK(renderer.last_frame_statistics().culled == 1);
+    CHECK_THROWS_AS(renderer.set_renderable_transform(1, {}), std::out_of_range);
+}
+
 TEST_CASE("renderer queues opaque front-to-back before translucent back-to-front") {
     Calls calls;
     mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};

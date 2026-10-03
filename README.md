@@ -23,14 +23,20 @@ types.
 - Backend-reported clip-space conventions, including OpenGL and zero-to-one depth ranges.
 - Mesh AABBs and bounding spheres, backend-neutral frustum culling, and deterministic render queues.
 - Opaque front-to-back and translucent back-to-front submission with per-frame render statistics.
-- Validated RGBA8 image data, linear/sRGB colour spaces, sampler descriptions, and RAII texture resources.
+- Optional `mgv::physics` domain with strong SI units, fixed timesteps, gravity, and rigid bodies.
+- Injectable sphere/AABB collision detection with penetration correction and restitution impulses.
+- Validated RGBA8 image data, linear/sRGB colour spaces, sampler descriptions, and RAII texture
+  resources.
 - `MaterialInstance` keeps named texture bindings separate from immutable material pipelines.
 - RAII ownership for windows, GL buffers, vertex arrays, shaders, and programs.
 - Pimpl façades for `Application`, `Renderer`, and `ObjLoader`.
-- Headless Catch2 tests for camera math, asset loading, and render orchestration.
+- Headless Catch2 tests for camera math, asset loading, physics, and render orchestration.
 
 The research and resulting design decisions are recorded in
 [`docs/research.md`](docs/research.md).
+
+The physics domain model, unit contract, and current MVP boundaries are documented in
+[`docs/physics.md`](docs/physics.md).
 
 ## WSL + Qt quick start
 
@@ -130,11 +136,13 @@ Qt / GLFW host    -> OpenGL backend -> RenderBackend <------------------- Render
 Scene -> Renderable -> Transform / MeshData / MaterialInstance --------> Renderer
                                       |-> Material -> Pipeline
                                       |-> Texture -> Image / Sampler
+Input / gameplay -> PhysicsWorld -> RigidBody / CollisionDetector
+                                      |-> Position -> Renderer transform update
 ```
 
-The CMake targets mirror these boundaries: `mgv::core`, `mgv::opengl`, and the optional Qt/GLFW
-entrypoints. A future Vulkan or Direct3D adapter can replace `mgv::opengl` without changing OBJ,
-camera, shader-file, or scene orchestration code.
+The CMake targets mirror these boundaries: `mgv::core`, `mgv::physics`, `mgv::opengl`, and the
+optional Qt/GLFW entrypoints. A future Vulkan or Direct3D adapter can replace `mgv::opengl` without
+changing OBJ, camera, shader-file, or scene orchestration code.
 
 `Scene` objects use shared immutable meshes, material pipelines, and textures. A `MaterialInstance`
 contains per-material named bindings without duplicating pipeline state. When a scene is submitted,

@@ -373,6 +373,13 @@ void Renderer::set_camera(Camera camera) {
     impl_->camera = std::move(camera);
 }
 
+void Renderer::set_renderable_transform(std::size_t index, Transform transform) {
+    if (index >= impl_->renderables.size()) {
+        throw std::out_of_range{"Renderable index is out of range"};
+    }
+    impl_->renderables[index].model_matrix = transform.matrix();
+}
+
 Camera Renderer::camera() const {
     return impl_->camera;
 }

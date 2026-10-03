@@ -56,6 +56,21 @@ target_include_directories(mgv_core PUBLIC
 target_include_directories(mgv_core SYSTEM PRIVATE "${stb_SOURCE_DIR}")
 target_link_libraries(mgv_core PRIVATE mgv::project_warnings)
 
+add_library(mgv_physics
+    src/physics/collider.cpp
+    src/physics/collision_detector.cpp
+    src/physics/physics_world.cpp
+    src/physics/rigid_body.cpp
+    src/physics/units.cpp
+)
+add_library(mgv::physics ALIAS mgv_physics)
+target_compile_features(mgv_physics PUBLIC cxx_std_20)
+target_include_directories(mgv_physics PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include>"
+)
+target_link_libraries(mgv_physics PRIVATE mgv::project_warnings)
+
 if(MGV_BUILD_QT_APP)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets OpenGLWidgets)
 endif()
@@ -154,6 +169,10 @@ if(BUILD_TESTING)
         tests/camera_controller_test.cpp
         tests/image_loader_test.cpp
         tests/obj_loader_test.cpp
+        tests/physics/collider_test.cpp
+        tests/physics/collision_detector_test.cpp
+        tests/physics/physics_world_test.cpp
+        tests/physics/units_test.cpp
         tests/renderer_test.cpp
         tests/scene_test.cpp
         tests/shader_loader_test.cpp
@@ -163,6 +182,7 @@ if(BUILD_TESTING)
     target_compile_features(mgv_tests PRIVATE cxx_std_20)
     target_link_libraries(mgv_tests PRIVATE
         mgv::core
+        mgv::physics
         mgv::project_warnings
         Catch2::Catch2WithMain
     )
