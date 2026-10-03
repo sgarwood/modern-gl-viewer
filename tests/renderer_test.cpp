@@ -28,6 +28,7 @@ struct Calls final {
     bool blending{};
     std::vector<std::string> texture_binding_names;
     std::vector<mgv::Vec4> colors;
+    std::vector<float> draw_markers;
     std::vector<mgv::Mat4> transforms;
 };
 
@@ -85,6 +86,9 @@ public:
         }
         for (const auto& binding : packet.colors) {
             calls_.colors.push_back(binding.value);
+        }
+        if (!packet.colors.empty()) {
+            calls_.draw_markers.push_back(packet.colors.front().value.x);
         }
         if (calls_.reject_draws) {
             throw std::runtime_error{"draw rejected"};
@@ -217,7 +221,7 @@ TEST_CASE("renderer submits every visible scene object and reuses shared GPU res
         mgv::ShaderSources{"vertex", "fragment", "test.vert", "test.frag"});
     const auto material_instance = std::make_shared<const mgv::MaterialInstance>(material);
     mgv::Transform moved;
-    moved.set_position({2.0F, 0.0F, 0.0F});
+    moved.set_position({0.5F, 0.0F, 0.0F});
     mgv::Scene scene;
     scene.add(mgv::Renderable{mesh, material_instance});
     scene.add(mgv::Renderable{mesh, material_instance, moved});
@@ -233,6 +237,110 @@ TEST_CASE("renderer submits every visible scene object and reuses shared GPU res
     CHECK(calls.ends == 1);
     REQUIRE(calls.transforms.size() == 2);
     CHECK(calls.transforms[0] != calls.transforms[1]);
+    CHECK(renderer.last_frame_statistics() == mgv::RenderStatistics{
+                                                   .submitted = 2,
+                                                   .culled = 0,
+                                                   .opaque = 2,
+                                                   .translucent = 0,
+                                               });
+}
+
+TEST_CASE("renderer culls objects outside the camera frustum") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    const auto mesh = std::make_shared<const mgv::MeshData>(mgv::MeshData{
+        .vertices = {{{-0.5F, -0.5F, 0.0F}, {}, {}},
+                     {{0.5F, -0.5F, 0.0F}, {}, {}},
+                     {{0.0F, 0.5F, 0.0F}, {}, {}}},
+        .indices = {0, 1, 2},
+    });
+    const auto instance = std::make_shared<const mgv::MaterialInstance>(
+        std::make_shared<const mgv::Material>(
+            mgv::ShaderSources{"vertex", "fragment", "test.vert", "test.frag"}));
+    mgv::Transform outside;
+    outside.set_position({100.0F, 0.0F, 0.0F});
+    mgv::Scene scene;
+    scene.add(mgv::Renderable{mesh, instance});
+    scene.add(mgv::Renderable{mesh, instance, outside});
+
+    renderer.set_scene(std::move(scene));
+    renderer.render({.framebuffer_width = 800, .framebuffer_height = 600});
+
+    CHECK(calls.draws == 1);
+    CHECK(renderer.last_frame_statistics() == mgv::RenderStatistics{
+                                                   .submitted = 1,
+                                                   .culled = 1,
+                                                   .opaque = 1,
+                                                   .translucent = 0,
+                                               });
+}
+
+TEST_CASE("renderer queues opaque front-to-back before translucent back-to-front") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    const auto mesh = std::make_shared<const mgv::MeshData>(mgv::MeshData{
+        .vertices = {{{-0.1F, -0.1F, 0.0F}, {}, {}},
+                     {{0.1F, -0.1F, 0.0F}, {}, {}},
+                     {{0.0F, 0.1F, 0.0F}, {}, {}}},
+        .indices = {0, 1, 2},
+    });
+    const auto opaque_material = std::make_shared<const mgv::Material>(
+        mgv::ShaderSources{"vertex", "fragment", "opaque.vert", "opaque.frag"});
+    auto translucent_descriptor = opaque_material->pipeline();
+    translucent_descriptor.blending.enabled = true;
+    const auto translucent_material =
+        std::make_shared<const mgv::Material>(std::move(translucent_descriptor));
+    const auto instance = [](const std::shared_ptr<const mgv::Material>& material, float marker) {
+        auto value = std::make_shared<mgv::MaterialInstance>(material);
+        value->set_color("uMarker", {marker, 0.0F, 0.0F, 1.0F});
+        return value;
+    };
+    mgv::Transform near;
+    near.set_position({0.0F, 0.0F, 1.0F});
+    mgv::Transform far;
+    far.set_position({0.0F, 0.0F, -2.0F});
+    mgv::Scene scene;
+    scene.add(mgv::Renderable{mesh, instance(translucent_material, 4.0F), near});
+    scene.add(mgv::Renderable{mesh, instance(opaque_material, 2.0F), far});
+    scene.add(mgv::Renderable{mesh, instance(translucent_material, 3.0F), far});
+    scene.add(mgv::Renderable{mesh, instance(opaque_material, 1.0F), near});
+
+    renderer.set_scene(std::move(scene));
+    renderer.render({.framebuffer_width = 800, .framebuffer_height = 600});
+
+    CHECK(calls.draw_markers == std::vector<float>{1.0F, 2.0F, 3.0F, 4.0F});
+    CHECK(renderer.last_frame_statistics() == mgv::RenderStatistics{
+                                                   .submitted = 4,
+                                                   .culled = 0,
+                                                   .opaque = 2,
+                                                   .translucent = 2,
+                                               });
+}
+
+TEST_CASE("render queue preserves submission order for equal sort keys") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    const auto mesh = std::make_shared<const mgv::MeshData>(mgv::MeshData{
+        .vertices = {{{-0.1F, -0.1F, 0.0F}, {}, {}},
+                     {{0.1F, -0.1F, 0.0F}, {}, {}},
+                     {{0.0F, 0.1F, 0.0F}, {}, {}}},
+        .indices = {0, 1, 2},
+    });
+    const auto material = std::make_shared<const mgv::Material>(
+        mgv::ShaderSources{"vertex", "fragment", "test.vert", "test.frag"});
+    const auto instance = [&material](float marker) {
+        auto value = std::make_shared<mgv::MaterialInstance>(material);
+        value->set_color("uMarker", {marker, 0.0F, 0.0F, 1.0F});
+        return value;
+    };
+    mgv::Scene scene;
+    scene.add(mgv::Renderable{mesh, instance(8.0F)});
+    scene.add(mgv::Renderable{mesh, instance(7.0F)});
+
+    renderer.set_scene(std::move(scene));
+    renderer.render({});
+
+    CHECK(calls.draw_markers == std::vector<float>{8.0F, 7.0F});
 }
 
 TEST_CASE("renderer rejects an empty scene without touching the backend") {

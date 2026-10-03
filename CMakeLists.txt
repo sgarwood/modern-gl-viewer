@@ -35,6 +35,7 @@ FetchContent_Declare(stb
 FetchContent_MakeAvailable(stb)
 
 add_library(mgv_core
+    src/bounds.cpp
     src/camera.cpp
     src/camera_controller.cpp
     src/image_loader.cpp
@@ -148,6 +149,7 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(Catch2)
 
     add_executable(mgv_tests
+        tests/bounds_test.cpp
         tests/camera_test.cpp
         tests/camera_controller_test.cpp
         tests/image_loader_test.cpp

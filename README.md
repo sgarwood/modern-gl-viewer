@@ -21,6 +21,8 @@ types.
 - Backend-neutral `RenderBackend`, `MeshResource`, and `RenderPipelineResource` APIs.
 - Explicit topology, rasterization, depth, and blending state in immutable pipeline descriptors.
 - Backend-reported clip-space conventions, including OpenGL and zero-to-one depth ranges.
+- Mesh AABBs and bounding spheres, backend-neutral frustum culling, and deterministic render queues.
+- Opaque front-to-back and translucent back-to-front submission with per-frame render statistics.
 - Validated RGBA8 image data, linear/sRGB colour spaces, sampler descriptions, and RAII texture resources.
 - `MaterialInstance` keeps named texture bindings separate from immutable material pipelines.
 - RAII ownership for windows, GL buffers, vertex arrays, shaders, and programs.
@@ -145,6 +147,5 @@ native pipeline resources.
 
 This is intentionally a focused viewer, not a complete Wavefront implementation. It supports
 `mtllib`, `usemtl`, `newmtl`, `Kd`, `d`, `Tr`, and plain `map_Kd` paths. Advanced MTL texture-map
-options, smoothing groups, illumination models, specular/normal maps, and camera-distance sorting
-of translucent primitives are not implemented. Faces and geometry attributes are supported, and
-absent normals are generated.
+options, smoothing groups, illumination models, and specular/normal maps are not implemented.
+Faces and geometry attributes are supported, and absent normals are generated.

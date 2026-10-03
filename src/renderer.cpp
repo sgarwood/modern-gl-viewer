@@ -1,10 +1,12 @@
 #include "mgv/renderer.hpp"
 
+#include "mgv/bounds.hpp"
 #include "mgv/image_loader.hpp"
 #include "mgv/obj_loader.hpp"
 #include "mgv/shader_loader.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -190,7 +192,19 @@ struct GpuRenderable final {
     Mat4 model_matrix{};
     std::vector<SampledTextureBinding> textures;
     std::vector<ColorBinding> colors;
+    BoundingSphere local_bounds;
+    bool translucent{};
     bool visible{true};
+};
+
+struct QueuedRenderable final {
+    const GpuRenderable* renderable{};
+    float distance_squared{};
+};
+
+struct GpuMesh final {
+    MeshResource* resource{};
+    BoundingSphere bounds;
 };
 
 struct GpuTexture final {
@@ -227,7 +241,9 @@ struct Renderer::Impl final {
     std::vector<std::unique_ptr<TextureResource>> textures;
     std::vector<std::unique_ptr<SamplerResource>> samplers;
     std::vector<GpuRenderable> renderables;
+    std::vector<QueuedRenderable> queue;
     Camera camera;
+    RenderStatistics statistics;
     bool scene_loaded{};
 };
 
@@ -257,7 +273,7 @@ void Renderer::set_scene(Scene scene) {
     std::vector<std::unique_ptr<TextureResource>> textures;
     std::vector<std::unique_ptr<SamplerResource>> samplers;
     std::vector<GpuRenderable> renderables;
-    std::unordered_map<const MeshData*, MeshResource*> mesh_cache;
+    std::unordered_map<const MeshData*, GpuMesh> mesh_cache;
     std::unordered_map<const Material*, RenderPipelineResource*> pipeline_cache;
     std::unordered_map<const Texture*, GpuTexture> texture_cache;
     renderables.reserve(scene.size());
@@ -266,13 +282,16 @@ void Renderer::set_scene(Scene scene) {
 
     for (const auto& renderable : scene.renderables()) {
         const auto* mesh_key = renderable.mesh().get();
-        auto* gpu_mesh = mesh_cache.contains(mesh_key) ? mesh_cache.at(mesh_key) : nullptr;
-        if (gpu_mesh == nullptr) {
+        auto gpu_mesh = mesh_cache.contains(mesh_key) ? mesh_cache.at(mesh_key) : GpuMesh{};
+        if (gpu_mesh.resource == nullptr) {
             auto resource = impl_->backend->create_mesh(*renderable.mesh());
             if (!resource) {
                 throw std::runtime_error{"Render backend returned an empty mesh resource"};
             }
-            gpu_mesh = resource.get();
+            gpu_mesh = {
+                .resource = resource.get(),
+                .bounds = calculate_bounds(*renderable.mesh()).sphere,
+            };
             mesh_cache.emplace(mesh_key, gpu_mesh);
             meshes.push_back(std::move(resource));
         }
@@ -328,11 +347,13 @@ void Renderer::set_scene(Scene scene) {
         }
 
         renderables.push_back({
-            .mesh = gpu_mesh,
+            .mesh = gpu_mesh.resource,
             .pipeline = gpu_pipeline,
             .model_matrix = renderable.transform().matrix(),
             .textures = std::move(gpu_texture_bindings),
             .colors = std::move(gpu_color_bindings),
+            .local_bounds = gpu_mesh.bounds,
+            .translucent = renderable.material_instance()->material()->pipeline().blending.enabled,
             .visible = renderable.visible(),
         });
     }
@@ -342,6 +363,9 @@ void Renderer::set_scene(Scene scene) {
     impl_->textures = std::move(textures);
     impl_->samplers = std::move(samplers);
     impl_->renderables = std::move(renderables);
+    impl_->queue.clear();
+    impl_->queue.reserve(impl_->renderables.size());
+    impl_->statistics = {};
     impl_->scene_loaded = true;
 }
 
@@ -363,18 +387,56 @@ void Renderer::render(const Frame& frame) {
     const auto view_projection = impl_->camera.view_projection_matrix(
         std::max(aspect, 0.01F),
         capabilities.clip_space);
-    const FrameScope frame_scope{*impl_->backend, frame};
+    const auto frustum = Frustum::from_view_projection(view_projection, capabilities.clip_space);
+    impl_->queue.clear();
+    RenderStatistics statistics;
     for (const auto& renderable : impl_->renderables) {
-        if (renderable.visible) {
-            impl_->backend->draw({
-                .mesh = *renderable.mesh,
-                .pipeline = *renderable.pipeline,
-                .model_view_projection = multiply(view_projection, renderable.model_matrix),
-                .textures = renderable.textures,
-                .colors = renderable.colors,
-            });
+        if (!renderable.visible) {
+            continue;
+        }
+        const auto world_bounds = transform_bounds(renderable.local_bounds, renderable.model_matrix);
+        if (!frustum.intersects(world_bounds)) {
+            ++statistics.culled;
+            continue;
+        }
+        const auto delta_x = world_bounds.center.x - impl_->camera.position().x;
+        const auto delta_y = world_bounds.center.y - impl_->camera.position().y;
+        const auto delta_z = world_bounds.center.z - impl_->camera.position().z;
+        impl_->queue.push_back({
+            .renderable = &renderable,
+            .distance_squared = delta_x * delta_x + delta_y * delta_y + delta_z * delta_z,
+        });
+        if (renderable.translucent) {
+            ++statistics.translucent;
+        } else {
+            ++statistics.opaque;
         }
     }
+    std::stable_sort(impl_->queue.begin(), impl_->queue.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.renderable->translucent != rhs.renderable->translucent) {
+            return !lhs.renderable->translucent;
+        }
+        return lhs.renderable->translucent
+            ? lhs.distance_squared > rhs.distance_squared
+            : lhs.distance_squared < rhs.distance_squared;
+    });
+    statistics.submitted = impl_->queue.size();
+    impl_->statistics = statistics;
+    const FrameScope frame_scope{*impl_->backend, frame};
+    for (const auto& item : impl_->queue) {
+        const auto& renderable = *item.renderable;
+        impl_->backend->draw({
+            .mesh = *renderable.mesh,
+            .pipeline = *renderable.pipeline,
+            .model_view_projection = multiply(view_projection, renderable.model_matrix),
+            .textures = renderable.textures,
+            .colors = renderable.colors,
+        });
+    }
+}
+
+RenderStatistics Renderer::last_frame_statistics() const noexcept {
+    return impl_->statistics;
 }
 
 } // namespace mgv
