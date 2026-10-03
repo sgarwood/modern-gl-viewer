@@ -71,6 +71,26 @@ target_include_directories(mgv_physics PUBLIC
 )
 target_link_libraries(mgv_physics PRIVATE mgv::project_warnings)
 
+find_package(Threads REQUIRED)
+
+add_library(mgv_network
+    src/network/datagram.cpp
+    src/network/network_service.cpp
+    src/network/udp_transport.cpp
+)
+add_library(mgv::network ALIAS mgv_network)
+target_compile_features(mgv_network PUBLIC cxx_std_20)
+target_include_directories(mgv_network PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include>"
+)
+target_link_libraries(mgv_network
+    PRIVATE mgv::project_warnings Threads::Threads
+)
+if(WIN32)
+    target_link_libraries(mgv_network PRIVATE ws2_32)
+endif()
+
 if(MGV_BUILD_QT_APP)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets OpenGLWidgets)
 endif()
@@ -169,6 +189,9 @@ if(BUILD_TESTING)
         tests/camera_controller_test.cpp
         tests/image_loader_test.cpp
         tests/obj_loader_test.cpp
+        tests/network/datagram_test.cpp
+        tests/network/network_service_test.cpp
+        tests/network/udp_transport_test.cpp
         tests/physics/collider_test.cpp
         tests/physics/collision_detector_test.cpp
         tests/physics/physics_world_test.cpp
@@ -182,6 +205,7 @@ if(BUILD_TESTING)
     target_compile_features(mgv_tests PRIVATE cxx_std_20)
     target_link_libraries(mgv_tests PRIVATE
         mgv::core
+        mgv::network
         mgv::physics
         mgv::project_warnings
         Catch2::Catch2WithMain

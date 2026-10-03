@@ -1,7 +1,7 @@
 # Open-source design research
 
-Research was performed on 30 September–1 October 2026 with GitHub CLI, using repository search, metadata,
-source-tree inspection, and shallow clones. Representative commands:
+Research was performed on 30 September–3 October 2026 with GitHub CLI, using repository search,
+metadata, source-tree inspection, and shallow clones. Representative commands:
 
 ```sh
 gh search repos opengl --language C++ --sort stars --limit 20
@@ -109,6 +109,28 @@ Widgets OpenGLWidgets)`, linked only through imported targets, and finalized wit
 WSLg supports integrated Linux GUI applications through Wayland and X11. The inspected machine has
 `WAYLAND_DISPLAY=wayland-0` and no `DISPLAY`, so the `wsl-qt` preset disables the GLFW shell and the
 documented launch command explicitly selects Qt's Wayland platform plugin.
+
+### [Asio](https://github.com/chriskohlhoff/asio)
+
+Asio's current chat server examples serialize each socket's asynchronous read/write workflow and
+keep pending messages in owned queues. This demonstrates the useful invariant that one execution
+context owns transport state, while callers exchange messages rather than manipulating sockets.
+
+Applied here: `NetworkService` confines the injected `DatagramTransport` to one worker and uses
+owned queues at the thread boundary. The initial UDP adapter stays deliberately small instead of
+adding Asio as another project dependency, but the transport port can accept an Asio adapter later.
+
+### [GameNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets) and
+[ENet](https://github.com/lsalzman/enet)
+
+GameNetworkingSockets' example chat loop polls incoming messages and connection callbacks from one
+owning loop, passing console input across threads through a synchronized queue. ENet similarly
+centres network progress around repeated `enet_host_service()` calls. Both reinforce explicit
+service-loop ownership and pulling events into application code at a controlled point.
+
+Applied here: frontends pull `NetworkEvent` values; the worker never invokes gameplay or rendering
+callbacks. Queues are bounded, shutdown is joined, and transport failures cross the thread boundary
+as data rather than uncaught exceptions.
 
 ## Deliberate choices
 

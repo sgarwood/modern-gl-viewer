@@ -25,6 +25,8 @@ types.
 - Opaque front-to-back and translucent back-to-front submission with per-frame render statistics.
 - Optional `mgv::physics` domain with strong SI units, fixed timesteps, gravity, and rigid bodies.
 - Injectable sphere/AABB collision detection with penetration correction and restitution impulses.
+- Optional `mgv::network` domain with a RAII `std::jthread` service and real IPv4 UDP transport.
+- Dependency-inverted network I/O, bounded message queues, backpressure, and failure events.
 - Validated RGBA8 image data, linear/sRGB colour spaces, sampler descriptions, and RAII texture
   resources.
 - `MaterialInstance` keeps named texture bindings separate from immutable material pipelines.
@@ -37,6 +39,9 @@ The research and resulting design decisions are recorded in
 
 The physics domain model, unit contract, and current MVP boundaries are documented in
 [`docs/physics.md`](docs/physics.md).
+
+The networking ownership, threading, and shutdown contracts are documented in
+[`docs/networking.md`](docs/networking.md).
 
 ## WSL + Qt quick start
 
@@ -138,11 +143,12 @@ Scene -> Renderable -> Transform / MeshData / MaterialInstance --------> Rendere
                                       |-> Texture -> Image / Sampler
 Input / gameplay -> PhysicsWorld -> RigidBody / CollisionDetector
                                       |-> Position -> Renderer transform update
+Frontend / gameplay -> NetworkService -> bounded queues -> DatagramTransport -> UDP socket
 ```
 
-The CMake targets mirror these boundaries: `mgv::core`, `mgv::physics`, `mgv::opengl`, and the
-optional Qt/GLFW entrypoints. A future Vulkan or Direct3D adapter can replace `mgv::opengl` without
-changing OBJ, camera, shader-file, or scene orchestration code.
+The CMake targets mirror these boundaries: `mgv::core`, `mgv::physics`, `mgv::network`,
+`mgv::opengl`, and the optional Qt/GLFW entrypoints. A future Vulkan or Direct3D adapter can replace
+`mgv::opengl` without changing OBJ, camera, shader-file, networking, or scene orchestration code.
 
 `Scene` objects use shared immutable meshes, material pipelines, and textures. A `MaterialInstance`
 contains per-material named bindings without duplicating pipeline state. When a scene is submitted,
