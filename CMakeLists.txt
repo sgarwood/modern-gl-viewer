@@ -7,6 +7,7 @@ include(FetchContent)
 
 option(MGV_BUILD_GLFW_APP "Build the GLFW viewer entrypoint" ON)
 option(MGV_BUILD_QT_APP "Build the Qt 6 viewer entrypoint" OFF)
+option(MGV_BUILD_QML_APP "Build the Qt Quick/QML main-menu entrypoint" OFF)
 option(MGV_HEADLESS_GLFW "Use GLFW's null platform for build/test environments" OFF)
 option(MGV_GLFW_X11 "Build GLFW's X11 platform on Linux" ON)
 option(MGV_GLFW_WAYLAND "Build GLFW's Wayland platform on Linux" OFF)
@@ -91,11 +92,15 @@ if(WIN32)
     target_link_libraries(mgv_network PRIVATE ws2_32)
 endif()
 
-if(MGV_BUILD_QT_APP)
+if(MGV_BUILD_QT_APP OR MGV_BUILD_QML_APP)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets OpenGLWidgets)
 endif()
 
-if(MGV_BUILD_GLFW_APP OR MGV_BUILD_QT_APP)
+if(MGV_BUILD_QML_APP)
+    find_package(Qt6 6.4 REQUIRED COMPONENTS Qml Quick QuickControls2)
+endif()
+
+if(MGV_BUILD_GLFW_APP OR MGV_BUILD_QT_APP OR MGV_BUILD_QML_APP)
     FetchContent_Declare(glad
         GIT_REPOSITORY https://github.com/Dav1dde/glad.git
         GIT_TAG 73db193f853e2ee079bf3ca8a64aa2eaf6459043 # v2.0.8
@@ -152,19 +157,38 @@ if(MGV_BUILD_GLFW_APP)
     )
 endif()
 
+if(MGV_BUILD_QT_APP OR MGV_BUILD_QML_APP)
+    add_library(mgv_qt_frontend
+        src/qt/main_menu_controller.cpp
+        src/qt/main_menu_controller.hpp
+        src/qt/qt_engine_launcher.cpp
+        src/qt/qt_engine_launcher.hpp
+        src/qt/qt_viewer_widget.cpp
+        src/qt/qt_viewer_widget.hpp
+        src/qt/qt_viewer_window.cpp
+        src/qt/qt_viewer_window.hpp
+    )
+    add_library(mgv::qt_frontend ALIAS mgv_qt_frontend)
+    set_target_properties(mgv_qt_frontend PROPERTIES AUTOMOC ON)
+    target_compile_features(mgv_qt_frontend PUBLIC cxx_std_20)
+    target_include_directories(mgv_qt_frontend PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/qt>"
+    )
+    target_link_libraries(mgv_qt_frontend
+        PUBLIC mgv::core Qt6::Core
+        PRIVATE mgv::opengl mgv::project_warnings Qt6::Widgets Qt6::OpenGLWidgets
+    )
+endif()
+
 if(MGV_BUILD_QT_APP)
     qt_add_executable(mgv_qt MANUAL_FINALIZATION
         src/qt/main.cpp
-        src/qt/qt_viewer_widget.cpp
-        src/qt/qt_viewer_widget.hpp
     )
     target_compile_features(mgv_qt PRIVATE cxx_std_20)
     target_link_libraries(mgv_qt PRIVATE
-        mgv::core
-        mgv::opengl
+        mgv::qt_frontend
         mgv::project_warnings
         Qt6::Widgets
-        Qt6::OpenGLWidgets
     )
     target_compile_definitions(mgv_qt PRIVATE
         MGV_DEFAULT_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
@@ -174,6 +198,34 @@ if(MGV_BUILD_QT_APP)
         MACOSX_BUNDLE TRUE
     )
     qt_finalize_executable(mgv_qt)
+endif()
+
+if(MGV_BUILD_QML_APP)
+    set_source_files_properties(qml/Main.qml PROPERTIES QT_RESOURCE_ALIAS Main.qml)
+    qt_add_executable(mgv_qml MANUAL_FINALIZATION src/qt/qml_main.cpp)
+    set_target_properties(mgv_qml PROPERTIES AUTOMOC ON)
+    qt_add_qml_module(mgv_qml
+        URI MgvMenu
+        VERSION 1.0
+        QML_FILES qml/Main.qml
+    )
+    target_compile_features(mgv_qml PRIVATE cxx_std_20)
+    target_link_libraries(mgv_qml PRIVATE
+        mgv::qt_frontend
+        mgv::project_warnings
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickControls2
+        Qt6::Widgets
+    )
+    target_compile_definitions(mgv_qml PRIVATE
+        MGV_DEFAULT_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    )
+    set_target_properties(mgv_qml PROPERTIES
+        WIN32_EXECUTABLE TRUE
+        MACOSX_BUNDLE TRUE
+    )
+    qt_finalize_executable(mgv_qml)
 endif()
 
 if(BUILD_TESTING)
@@ -213,6 +265,11 @@ if(BUILD_TESTING)
     target_compile_definitions(mgv_tests PRIVATE
         MGV_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
     )
+
+    if(TARGET mgv_qt_frontend)
+        target_sources(mgv_tests PRIVATE tests/qt/main_menu_controller_test.cpp)
+        target_link_libraries(mgv_tests PRIVATE mgv::qt_frontend)
+    endif()
 
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)

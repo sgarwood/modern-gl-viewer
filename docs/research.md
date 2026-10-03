@@ -104,6 +104,13 @@ Applied here: Qt is a system dependency discovered with `find_package(Qt6 6.4 RE
 Widgets OpenGLWidgets)`, linked only through imported targets, and finalized with
 `qt_finalize_executable`. Qt is not fetched or leaked into the portable library.
 
+The QML launcher follows the same adapter boundary. Declarative code sees only URL/status
+properties and commands on `MainMenuController`; it never receives a renderer or native OpenGL
+object. The controller depends on the abstract `EngineLauncher`, while `QtEngineLauncher` adapts
+that port to the reusable widgets engine window. `qt_add_qml_module` embeds and compiles the menu,
+and the feature remains an explicit CMake option so headless and non-Qt builds do not acquire QML
+dependencies.
+
 ### [WSLg GUI support](https://learn.microsoft.com/en-us/windows/wsl/tutorials/gui-apps)
 
 WSLg supports integrated Linux GUI applications through Wayland and X11. The inspected machine has

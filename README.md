@@ -6,7 +6,8 @@ types.
 
 ## Features
 
-- Qt 6 `QOpenGLWidget` entrypoint designed for WSLg/Wayland, with file pickers for OBJ and GLSL.
+- Qt Quick/QML main menu for choosing OBJ/GLSL assets and launching the native engine window.
+- Qt 6 `QOpenGLWidget` engine shell designed for WSLg/Wayland, with file pickers for OBJ and GLSL.
 - GLFW entrypoint for lightweight native use.
 - Runtime OBJ loading with `v`, `vt`, `vn`, positive/negative indices, polygon triangulation,
   vertex deduplication, generated normals, and material-preserving submeshes.
@@ -51,7 +52,30 @@ Install Qt 6 and its Wayland platform plugin in Ubuntu 24.04:
 sudo apt install build-essential cmake qt6-base-dev qt6-wayland libxkbcommon-dev
 ```
 
-Configure, build, test, and run using the checked-in preset:
+For the QML main menu, install Qt Declarative and its runtime imports as well:
+
+```sh
+sudo apt install qt6-declarative-dev qt6-declarative-dev-tools \
+  qml6-module-qtquick qml6-module-qtquick-controls \
+  qml6-module-qtquick-dialogs qml6-module-qtquick-layouts \
+  qml6-module-qtquick-templates qml6-module-qtquick-window \
+  qml6-module-qtqml-models qml6-module-qtqml-workerscript
+```
+
+Configure, build, test, and launch the QML menu with its checked-in preset:
+
+```sh
+cmake --preset wsl-qml
+cmake --build --preset wsl-qml --parallel
+ctest --preset wsl-qml
+QT_QPA_PLATFORM=wayland ./build/wsl-qml/mgv_qml
+```
+
+The menu selects the model and runtime shaders through QML file dialogs. `MainMenuController`
+validates those URLs and invokes an abstract `EngineLauncher`; the Qt adapter then opens the same
+tested `QtViewerWindow` used by the widgets entrypoint. The menu remains open for rapid relaunches.
+
+To launch the widgets entrypoint directly without the QML menu:
 
 ```sh
 cmake --preset wsl-qt
@@ -137,6 +161,7 @@ omit it. Asset loads also provide optional `sampler2D uBaseColorTexture` and
 
 ```text
 Qt / GLFW adapter -> InputSink <- OrbitCameraController -> CameraTarget <- Renderer -> Camera
+QML menu -> MainMenuController -> EngineLauncher -> QtViewerWindow -> Renderer
 Qt / GLFW host    -> OpenGL backend -> RenderBackend <------------------- Renderer
 Scene -> Renderable -> Transform / MeshData / MaterialInstance --------> Renderer
                                       |-> Material -> Pipeline
@@ -147,8 +172,9 @@ Frontend / gameplay -> NetworkService -> bounded queues -> DatagramTransport -> 
 ```
 
 The CMake targets mirror these boundaries: `mgv::core`, `mgv::physics`, `mgv::network`,
-`mgv::opengl`, and the optional Qt/GLFW entrypoints. A future Vulkan or Direct3D adapter can replace
-`mgv::opengl` without changing OBJ, camera, shader-file, networking, or scene orchestration code.
+`mgv::opengl`, `mgv::qt_frontend`, and the optional QML/Qt/GLFW entrypoints. A future Vulkan or
+Direct3D adapter can replace `mgv::opengl` without changing OBJ, camera, shader-file, networking, or
+scene orchestration code.
 
 `Scene` objects use shared immutable meshes, material pipelines, and textures. A `MaterialInstance`
 contains per-material named bindings without duplicating pipeline state. When a scene is submitted,
