@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
@@ -24,7 +25,7 @@ TEST_CASE("datagrams own a bounded binary payload") {
     const mgv::network::Datagram datagram{endpoint, payload};
 
     CHECK(datagram.peer() == endpoint);
-    CHECK(datagram.payload() == payload);
+    CHECK(std::ranges::equal(datagram.payload(), payload));
     CHECK_THROWS_AS(
         (mgv::network::Datagram{
             endpoint,

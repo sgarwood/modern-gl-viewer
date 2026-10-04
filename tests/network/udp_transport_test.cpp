@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <memory>
@@ -27,6 +28,6 @@ TEST_CASE("UDP services exchange a datagram over the loopback interface") {
     REQUIRE(event.has_value());
     REQUIRE(std::holds_alternative<mgv::network::DatagramReceived>(*event));
     const auto& received = std::get<mgv::network::DatagramReceived>(*event).datagram;
-    CHECK(received.payload() == payload);
+    CHECK(std::ranges::equal(received.payload(), payload));
     CHECK(received.peer().host() == "127.0.0.1");
 }

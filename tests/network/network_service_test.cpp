@@ -2,6 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -161,8 +162,9 @@ TEST_CASE("network service confines transport IO to its worker thread") {
 
     REQUIRE(event.has_value());
     REQUIRE(std::holds_alternative<mgv::network::DatagramReceived>(*event));
-    CHECK(std::get<mgv::network::DatagramReceived>(*event).datagram.payload() ==
-          test_datagram().payload());
+    CHECK(std::ranges::equal(
+        std::get<mgv::network::DatagramReceived>(*event).datagram.payload(),
+        test_datagram().payload()));
     {
         std::unique_lock lock{state->mutex};
         REQUIRE(state->condition.wait_for(lock, 1s, [&state] {
