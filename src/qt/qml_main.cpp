@@ -2,6 +2,7 @@
 #include "qt_engine_launcher.hpp"
 
 #include "mgv/renderer.hpp"
+#include "mgv/runtime_paths.hpp"
 
 #include <QApplication>
 #include <QCommandLineOption>
@@ -47,7 +48,9 @@ int main(int argc, char** argv) {
     parser.addOption(launch_option);
     parser.process(application);
 
-    const auto asset_directory = std::filesystem::path{MGV_DEFAULT_ASSET_DIR};
+    const auto asset_directory = mgv::locate_asset_directory(
+        MGV_DEFAULT_ASSET_DIR,
+        std::filesystem::path{QApplication::applicationDirPath().toStdString()});
     QtEngineLauncher launcher;
     MainMenuController controller{
         launcher,

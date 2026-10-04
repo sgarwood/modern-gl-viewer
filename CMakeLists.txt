@@ -4,6 +4,7 @@ project(modern_gl_viewer VERSION 0.2.0 LANGUAGES C CXX)
 
 include(CTest)
 include(FetchContent)
+include(GNUInstallDirs)
 
 option(MGV_BUILD_GLFW_APP "Build the GLFW viewer entrypoint" ON)
 option(MGV_BUILD_QT_APP "Build the Qt 6 viewer entrypoint" OFF)
@@ -43,6 +44,7 @@ add_library(mgv_core
     src/material.cpp
     src/obj_loader.cpp
     src/renderer.cpp
+    src/runtime_paths.cpp
     src/scene.cpp
     src/shader_loader.cpp
     src/texture.cpp
@@ -249,6 +251,7 @@ if(BUILD_TESTING)
         tests/physics/physics_world_test.cpp
         tests/physics/units_test.cpp
         tests/renderer_test.cpp
+        tests/runtime_paths_test.cpp
         tests/scene_test.cpp
         tests/shader_loader_test.cpp
         tests/texture_test.cpp
@@ -274,4 +277,76 @@ if(BUILD_TESTING)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)
     catch_discover_tests(mgv_tests)
+endif()
+
+set(MGV_INSTALL_TARGETS)
+if(TARGET mgv)
+    list(APPEND MGV_INSTALL_TARGETS mgv)
+endif()
+if(TARGET mgv_qt)
+    list(APPEND MGV_INSTALL_TARGETS mgv_qt)
+endif()
+if(TARGET mgv_qml)
+    list(APPEND MGV_INSTALL_TARGETS mgv_qml)
+endif()
+
+if(MGV_INSTALL_TARGETS)
+    install(TARGETS ${MGV_INSTALL_TARGETS}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        BUNDLE DESTINATION .
+    )
+    install(DIRECTORY assets/
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/modern-gl-viewer/assets
+    )
+
+    if(TARGET mgv_qml)
+        if(Qt6_VERSION VERSION_LESS 6.5)
+            # Qt 6.4 exposed this technology-preview output parameter under its
+            # original name. Ubuntu 24.04 still ships that API.
+            qt_generate_deploy_qml_app_script(
+                TARGET mgv_qml
+                FILENAME_VARIABLE mgv_qml_deploy_script
+                NO_UNSUPPORTED_PLATFORM_ERROR
+            )
+        else()
+            qt_generate_deploy_qml_app_script(
+                TARGET mgv_qml
+                OUTPUT_SCRIPT mgv_qml_deploy_script
+                NO_UNSUPPORTED_PLATFORM_ERROR
+            )
+        endif()
+        install(SCRIPT ${mgv_qml_deploy_script})
+        set(CPACK_PACKAGE_EXECUTABLES "mgv_qml" "Modern GL Viewer")
+    elseif(TARGET mgv_qt)
+        set(CPACK_PACKAGE_EXECUTABLES "mgv_qt" "Modern GL Viewer")
+    else()
+        set(CPACK_PACKAGE_EXECUTABLES "mgv" "Modern GL Viewer")
+    endif()
+
+    set(CPACK_PACKAGE_NAME "modern-gl-viewer")
+    set(CPACK_PACKAGE_VENDOR "Modern GL Viewer")
+    set(CPACK_PACKAGE_CONTACT "Modern GL Viewer maintainers")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+        "A backend-neutral C++20 OBJ viewer with Qt Quick and OpenGL frontends"
+    )
+    set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY "Modern GL Viewer")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+
+    if(WIN32)
+        set(CPACK_GENERATOR WIX)
+        set(CPACK_WIX_UPGRADE_GUID "6F6814F2-38C2-4D55-8D55-5D81C09D5A2A")
+    else()
+        set(CPACK_GENERATOR DEB)
+        set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+        set(CPACK_DEBIAN_PACKAGE_SECTION graphics)
+        set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+        if(TARGET mgv_qml)
+            set(CPACK_DEBIAN_PACKAGE_DEPENDS
+                "qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-dialogs, qml6-module-qtquick-layouts, qml6-module-qtquick-templates, qml6-module-qtquick-window, qml6-module-qtqml-models, qml6-module-qtqml-workerscript"
+            )
+        endif()
+    endif()
+
+    include(CPack)
 endif()

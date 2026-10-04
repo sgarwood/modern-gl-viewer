@@ -1,0 +1,260 @@
+version: 2.1
+
+parameters:
+  run_release:
+    type: boolean
+    default: false
+  release_tag:
+    type: string
+    default: "v0.2.0-rc.1"
+
+jobs:
+  build_ubuntu:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    steps:
+      - checkout
+      - run:
+          name: Install build tools
+          command: |
+            sudo apt-get update
+            sudo apt-get install --yes ninja-build
+      - run:
+          name: Configure
+          command: |
+            cmake -S . -B build/ci -G Ninja \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DBUILD_TESTING=ON \
+              -DMGV_BUILD_GLFW_APP=OFF \
+              -DMGV_BUILD_QT_APP=OFF \
+              -DMGV_BUILD_QML_APP=OFF \
+              -DMGV_WARNINGS_AS_ERRORS=ON
+      - run:
+          name: Build
+          command: cmake --build build/ci --parallel
+      - run:
+          name: Test
+          command: ctest --test-dir build/ci --output-on-failure
+
+  build_windows:
+    machine:
+      image: windows-server-2022-gui:2025.10.1
+      shell: powershell.exe -ExecutionPolicy Bypass
+    resource_class: windows.medium
+    steps:
+      - checkout
+      - run:
+          name: Configure
+          command: |
+            cmake -S . -B build/ci -G "Visual Studio 17 2022" -A x64 `
+              -DBUILD_TESTING=ON `
+              -DMGV_BUILD_GLFW_APP=OFF `
+              -DMGV_BUILD_QT_APP=OFF `
+              -DMGV_BUILD_QML_APP=OFF `
+              -DMGV_WARNINGS_AS_ERRORS=ON
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: Build
+          command: |
+            cmake --build build/ci --config Debug --parallel
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: Test
+          command: |
+            ctest --test-dir build/ci -C Debug --output-on-failure
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  validate_release:
+    docker:
+      - image: cimg/base:current
+    environment:
+      RELEASE_TAG: << pipeline.parameters.release_tag >>
+    steps:
+      - checkout
+      - run:
+          name: Validate manual release request
+          command: |
+            if [ "${CIRCLE_BRANCH}" != "main" ]; then
+              echo "Releases must be triggered for the main branch."
+              exit 1
+            fi
+            if ! printf '%s' "${RELEASE_TAG}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z][0-9A-Za-z.-]*$'; then
+              echo "release_tag must be a prerelease tag such as v0.2.0-rc.1."
+              exit 1
+            fi
+            project_version="$(sed -n 's/^project(modern_gl_viewer VERSION \([^ ]*\).*/\1/p' CMakeLists.txt)"
+            case "${RELEASE_TAG}" in
+              "v${project_version}-"*) ;;
+              *)
+                echo "release_tag must be a prerelease of project version ${project_version}."
+                exit 1
+                ;;
+            esac
+
+  package_deb:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    environment:
+      RELEASE_TAG: << pipeline.parameters.release_tag >>
+    steps:
+      - checkout
+      - run:
+          name: Install Qt and packaging tools
+          command: |
+            sudo apt-get update
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+              build-essential ninja-build libgl1-mesa-dev libxkbcommon-dev \
+              qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools \
+              qml6-module-qtquick qml6-module-qtquick-controls \
+              qml6-module-qtquick-dialogs qml6-module-qtquick-layouts \
+              qml6-module-qtquick-templates qml6-module-qtquick-window \
+              qml6-module-qtqml-models qml6-module-qtqml-workerscript
+      - run:
+          name: Configure release
+          command: |
+            cmake -S . -B build/release -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_TESTING=ON \
+              -DMGV_BUILD_GLFW_APP=OFF \
+              -DMGV_BUILD_QT_APP=OFF \
+              -DMGV_BUILD_QML_APP=ON \
+              -DMGV_WARNINGS_AS_ERRORS=ON
+      - run:
+          name: Build and test
+          command: |
+            cmake --build build/release --parallel
+            ctest --test-dir build/release --output-on-failure
+      - run:
+          name: Build Debian package
+          command: |
+            mkdir -p release-artifacts
+            cpack --config build/release/CPackConfig.cmake -G DEB -B release-artifacts
+            package_path="$(find release-artifacts -maxdepth 1 -type f -name '*.deb' -print -quit)"
+            test -n "${package_path}"
+            release_version="${RELEASE_TAG#v}"
+            mv "${package_path}" "release-artifacts/modern-gl-viewer-${release_version}-ubuntu-amd64.deb"
+            dpkg-deb --info "release-artifacts/modern-gl-viewer-${release_version}-ubuntu-amd64.deb"
+      - store_artifacts:
+          path: release-artifacts
+          destination: packages
+      - persist_to_workspace:
+          root: .
+          paths:
+            - release-artifacts/*.deb
+
+  package_msi:
+    machine:
+      image: windows-server-2022-gui:2025.10.1
+      shell: powershell.exe -ExecutionPolicy Bypass
+    resource_class: windows.medium
+    environment:
+      QT_VERSION: "6.8.3"
+      RELEASE_TAG: << pipeline.parameters.release_tag >>
+    steps:
+      - checkout
+      - run:
+          name: Install Qt and WiX
+          no_output_timeout: 30m
+          command: |
+            py -m pip install --disable-pip-version-check "aqtinstall==3.3.0"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            py -m aqt install-qt windows desktop $env:QT_VERSION win64_msvc2022_64 `
+              --outputdir C:\Qt
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            choco install wixtoolset --version=3.14.1.20250415 --yes --no-progress
+            $chocoExit = $LASTEXITCODE
+            if (@(0, 1641, 3010) -notcontains $chocoExit) { exit $chocoExit }
+            Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+            refreshenv
+      - run:
+          name: Configure release
+          command: |
+            $qtPrefix = "C:\Qt\$env:QT_VERSION\msvc2022_64"
+            cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 `
+              -DCMAKE_PREFIX_PATH="$qtPrefix" `
+              -DBUILD_TESTING=ON `
+              -DMGV_BUILD_GLFW_APP=OFF `
+              -DMGV_BUILD_QT_APP=OFF `
+              -DMGV_BUILD_QML_APP=ON `
+              -DMGV_WARNINGS_AS_ERRORS=ON
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: Build and test
+          command: |
+            cmake --build build/release --config Release --parallel
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            ctest --test-dir build/release -C Release --output-on-failure
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run:
+          name: Build Windows installer
+          command: |
+            New-Item -ItemType Directory -Force release-artifacts | Out-Null
+            cpack --config build/release/CPackConfig.cmake -G WIX -C Release -B release-artifacts
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $package = Get-ChildItem release-artifacts -Filter *.msi | Select-Object -First 1
+            if ($null -eq $package) { throw "CPack did not create an MSI" }
+            $releaseVersion = $env:RELEASE_TAG.Substring(1)
+            $destination = "release-artifacts\modern-gl-viewer-$releaseVersion-windows-x64.msi"
+            Move-Item $package.FullName $destination
+      - store_artifacts:
+          path: release-artifacts
+          destination: packages
+      - persist_to_workspace:
+          root: .
+          paths:
+            - release-artifacts/*.msi
+
+  publish_prerelease:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    environment:
+      RELEASE_TAG: << pipeline.parameters.release_tag >>
+    steps:
+      - attach_workspace:
+          at: /tmp/workspace
+      - run:
+          name: Publish GitHub prerelease
+          command: |
+            sudo apt-get update
+            sudo apt-get install --yes gh
+            test -n "${GITHUB_TOKEN:-}" || {
+              echo "GITHUB_TOKEN is required in the github-release context."
+              exit 1
+            }
+            test "$(find /tmp/workspace/release-artifacts -name '*.deb' | wc -l)" -eq 1
+            test "$(find /tmp/workspace/release-artifacts -name '*.msi' | wc -l)" -eq 1
+            GH_TOKEN="${GITHUB_TOKEN}" gh release create "${RELEASE_TAG}" \
+              /tmp/workspace/release-artifacts/*.deb \
+              /tmp/workspace/release-artifacts/*.msi \
+              --repo "${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}" \
+              --target "${CIRCLE_SHA1}" \
+              --title "Modern GL Viewer ${RELEASE_TAG}" \
+              --generate-notes \
+              --prerelease
+
+workflows:
+  build_matrix:
+    when:
+      not: << pipeline.parameters.run_release >>
+    jobs:
+      - build_ubuntu
+      - build_windows
+
+  manual_prerelease:
+    when: << pipeline.parameters.run_release >>
+    jobs:
+      - validate_release
+      - package_deb:
+          requires:
+            - validate_release
+      - package_msi:
+          requires:
+            - validate_release
+      - publish_prerelease:
+          context: github-release
+          requires:
+            - package_deb
+            - package_msi

@@ -11,6 +11,8 @@
 /_deps/
 /cmake_install.cmake
 /compile_commands.json
+/release-artifacts/
+/aqtinstall.log
 
 # Tooling and editor state
 /.cache/

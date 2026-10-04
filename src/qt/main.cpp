@@ -1,6 +1,7 @@
 #include "qt_viewer_window.hpp"
 
 #include "mgv/renderer.hpp"
+#include "mgv/runtime_paths.hpp"
 
 #include <QApplication>
 #include <QCommandLineOption>
@@ -41,7 +42,9 @@ int main(int argc, char** argv) {
     QApplication::setApplicationName("Modern GL Viewer");
     QApplication::setApplicationVersion("0.2.0");
 
-    const auto asset_directory = std::filesystem::path{MGV_DEFAULT_ASSET_DIR};
+    const auto asset_directory = mgv::locate_asset_directory(
+        MGV_DEFAULT_ASSET_DIR,
+        std::filesystem::path{QApplication::applicationDirPath().toStdString()});
     QCommandLineParser parser;
     parser.setApplicationDescription("A backend-neutral C++ OBJ viewer with a Qt 6 shell.");
     parser.addHelpOption();

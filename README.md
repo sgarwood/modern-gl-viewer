@@ -44,6 +44,9 @@ The physics domain model, unit contract, and current MVP boundaries are document
 The networking ownership, threading, and shutdown contracts are documented in
 [`docs/networking.md`](docs/networking.md).
 
+Cross-platform CircleCI builds and the manually triggered Debian/MSI prerelease process are
+documented in [`docs/releasing.md`](docs/releasing.md).
+
 ## WSL + Qt quick start
 
 Install Qt 6 and its Wayland platform plugin in Ubuntu 24.04:
