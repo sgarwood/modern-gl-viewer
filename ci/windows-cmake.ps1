@@ -21,3 +21,11 @@ if (-not (Test-Path (Join-Path $cmakeDirectory "cmake.exe"))) {
 }
 
 $env:Path = "$cmakeDirectory;$env:Path"
+
+if ($env:QT_VERSION) {
+    $qtBinDirectory = "C:\Qt\$env:QT_VERSION\msvc2022_64\bin"
+    if (-not (Test-Path $qtBinDirectory)) {
+        throw "Qt runtime directory was not found at $qtBinDirectory"
+    }
+    $env:Path = "$qtBinDirectory;$env:Path"
+}
