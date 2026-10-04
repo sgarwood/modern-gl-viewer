@@ -48,6 +48,7 @@ jobs:
           name: Configure
           command: |
             $ErrorActionPreference = "Stop"
+            . .\ci\windows-cmake.ps1
             cmake -S . -B build/ci -G "Visual Studio 17 2022" -A x64 `
               -DBUILD_TESTING=ON `
               -DMGV_BUILD_GLFW_APP=OFF `
@@ -59,12 +60,14 @@ jobs:
           name: Build
           command: |
             $ErrorActionPreference = "Stop"
+            . .\ci\windows-cmake.ps1
             cmake --build build/ci --config Debug --parallel
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - run:
           name: Test
           command: |
             $ErrorActionPreference = "Stop"
+            . .\ci\windows-cmake.ps1
             ctest --test-dir build/ci -C Debug --output-on-failure
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -108,12 +111,13 @@ jobs:
           command: |
             sudo apt-get update
             sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-              build-essential ninja-build python3-jinja2 libgl1-mesa-dev libxkbcommon-dev \
+              build-essential ninja-build libgl1-mesa-dev libxkbcommon-dev \
               qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools \
               qml6-module-qtquick qml6-module-qtquick-controls \
               qml6-module-qtquick-dialogs qml6-module-qtquick-layouts \
               qml6-module-qtquick-templates qml6-module-qtquick-window \
               qml6-module-qtqml-models qml6-module-qtqml-workerscript
+            python3 -m pip install --disable-pip-version-check "Jinja2==3.1.6"
       - run:
           name: Configure release
           command: |
@@ -176,6 +180,7 @@ jobs:
           name: Configure release
           command: |
             $ErrorActionPreference = "Stop"
+            . .\ci\windows-cmake.ps1
             $qtPrefix = "C:\Qt\$env:QT_VERSION\msvc2022_64"
             cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 `
               -DCMAKE_PREFIX_PATH="$qtPrefix" `
@@ -189,6 +194,7 @@ jobs:
           name: Build and test
           command: |
             $ErrorActionPreference = "Stop"
+            . .\ci\windows-cmake.ps1
             cmake --build build/release --config Release --parallel
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             ctest --test-dir build/release -C Release --output-on-failure
@@ -197,6 +203,7 @@ jobs:
           name: Build Windows installer
           command: |
             $ErrorActionPreference = "Stop"
+            . .\ci\windows-cmake.ps1
             New-Item -ItemType Directory -Force release-artifacts | Out-Null
             $cmakeDirectory = Split-Path (Get-Command cmake).Source
             $cpack = Join-Path $cmakeDirectory "cpack.exe"
