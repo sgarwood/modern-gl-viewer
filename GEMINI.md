@@ -13,6 +13,10 @@
 *   A feature is not done until the interfaces are defined, the implementation is written, the unit/integration tests pass, and manual QA confirms its effectiveness.
 *   Never leave dangling "TODOs" in active feature paths if they are part of the current vertical slice being built.
 
-## 4. Manual QA & Evaluation
+## 4. SOLID Design & Dependency Inversion
+*   Strictly apply SOLID design principles where possible.
+*   Abstract third-party libraries behind custom interfaces (Dependency Inversion). Never tightly couple concrete external implementations (like JSON parsers or specific network libraries) directly into the core business logic.
+
+## 5. Manual QA & Evaluation
 *   Beyond automated tests, proactively verify the system behaves correctly in the real environment.
 *   Evaluate the effectiveness and performance of the solution before closing the task.

@@ -15,6 +15,9 @@
 
 namespace mgv::hardware {
 
+Mlm2ProAdapter::Mlm2ProAdapter(std::unique_ptr<IShotDataParser> parser) 
+    : parser_(std::move(parser)) {}
+
 void Mlm2ProAdapter::set_callback(ShotCallback callback) {
     callback_ = std::move(callback);
 }
@@ -58,11 +61,10 @@ void Mlm2ProAdapter::start() {
             
             if (client_socket >= 0) {
                 char buffer[2048] = {0};
-                // In a real robust server, we'd loop recv. For GSPro JSON, usually it's one small packet.
                 ssize_t valread = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
                 if (valread > 0) {
                     std::string payload(buffer, valread);
-                    parse_json_payload(payload);
+                    handle_payload(payload);
                 }
                 close(client_socket);
             }
@@ -93,34 +95,12 @@ void Mlm2ProAdapter::simulate_shot_received(float speed, float launch, float dir
     }
 }
 
-#include "mgv/hardware/json.hpp"
-
-void Mlm2ProAdapter::parse_json_payload(const std::string& payload) {
-    try {
-        auto j = nlohmann::json::parse(payload);
-        
-        if (j.contains("BallData") && j["BallData"].is_object()) {
-            const auto& ball_data = j["BallData"];
-            
-            float speed_mph = ball_data.value("Speed", 0.0f);
-            float hla = ball_data.value("HLA", 0.0f);
-            float vla = ball_data.value("VLA", 0.0f);
-            float total_spin = ball_data.value("TotalSpin", 0.0f);
-            float spin_axis = ball_data.value("SpinAxis", 0.0f);
-
-            if (callback_ && is_running_) {
-                ShotData data{};
-                data.ball_speed_mps = speed_mph * 0.44704f; // MPH to m/s
-                data.launch_angle_deg = vla;
-                data.launch_direction_deg = hla;
-                data.total_spin_rpm = total_spin;
-                data.spin_axis_deg = spin_axis;
-                data.is_putt = false;
-                callback_(data);
-            }
-        }
-    } catch (const nlohmann::json::parse_error& /*e*/) {
-        // Silently drop malformed payloads rather than crashing the network listener
+void Mlm2ProAdapter::handle_payload(const std::string& payload) {
+    if (!parser_) return;
+    
+    auto parsed_data = parser_->parse(payload);
+    if (parsed_data.has_value() && callback_ && is_running_) {
+        callback_(parsed_data.value());
     }
 }
 

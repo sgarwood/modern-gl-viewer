@@ -1,5 +1,6 @@
 #include "mgv/hardware/mlm2_pro_adapter.hpp"
 #include "mgv/hardware/vertex_adapter.hpp"
+#include "mgv/hardware/gspro_json_parser.hpp"
 #include "mgv/hardware/shot_data.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -10,7 +11,7 @@
 using namespace mgv::hardware;
 
 TEST_CASE("MLM2PRO adapter can trigger a simulated shot callback") {
-    Mlm2ProAdapter adapter;
+    Mlm2ProAdapter adapter{std::make_unique<GSProJsonParser>()};
     std::optional<ShotData> received_shot;
 
     adapter.set_callback([&](const ShotData& data) {
@@ -57,7 +58,7 @@ TEST_CASE("Vertex adapter can trigger a simulated putt callback") {
 #include <chrono>
 
 TEST_CASE("MLM2PRO adapter receives and parses GSPro JSON over local TCP socket", "[integration]") {
-    Mlm2ProAdapter adapter;
+    Mlm2ProAdapter adapter{std::make_unique<GSProJsonParser>()};
     std::optional<ShotData> received_shot;
 
     adapter.set_callback([&](const ShotData& data) {

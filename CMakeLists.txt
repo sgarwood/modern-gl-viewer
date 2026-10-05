@@ -111,6 +111,7 @@ if(WIN32)
 endif()
 
 add_library(mgv_hardware
+    src/hardware/gspro_json_parser.cpp
     src/hardware/mlm2_pro_adapter.cpp
     src/hardware/vertex_adapter.cpp
 )
