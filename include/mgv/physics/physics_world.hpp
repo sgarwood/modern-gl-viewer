@@ -36,6 +36,7 @@ public:
     [[nodiscard]] const RigidBody& body(BodyId id) const;
     [[nodiscard]] std::span<const Collision> collisions() const noexcept;
 
+    void set_wind(LinearVelocity wind);
     void apply_impulse(BodyId id, Impulse impulse);
     void simulate(Duration elapsed_time);
 

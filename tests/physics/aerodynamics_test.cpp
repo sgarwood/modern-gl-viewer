@@ -34,3 +34,27 @@ TEST_CASE("golf ball with backspin generates lift (magnus effect)") {
     // The backspin ball should have a higher Y position than the no_spin ball due to lift
     CHECK(world.body(backspin).position().metres().y > world.body(no_spin).position().metres().y);
 }
+
+TEST_CASE("wind alters trajectory") {
+    mgv::physics::PhysicsConfiguration configuration;
+    configuration.fixed_time_step = mgv::physics::Duration{0.01F};
+    configuration.gravity = mgv::physics::Acceleration{{0.0F, -9.81F, 0.0F}};
+    
+    // Create world with NO wind
+    mgv::physics::PhysicsWorld world_no_wind{configuration};
+    const auto ball_no_wind = world_no_wind.add_body(golf_ball({0.0F, 0.0F, 0.0F}, {50.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 0.0F}));
+    
+    // Create world WITH strong crosswind
+    mgv::physics::PhysicsWorld world_with_wind{configuration};
+    world_with_wind.set_wind(mgv::physics::LinearVelocity{{0.0F, 0.0F, 20.0F}}); // 20 m/s crosswind in Z
+    const auto ball_with_wind = world_with_wind.add_body(golf_ball({0.0F, 0.0F, 0.0F}, {50.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 0.0F}));
+
+    world_no_wind.simulate(mgv::physics::Duration{0.5F});
+    world_with_wind.simulate(mgv::physics::Duration{0.5F});
+
+    // The ball in the wind should have been blown in the Z direction
+    CHECK(world_with_wind.body(ball_with_wind).position().metres().z > world_no_wind.body(ball_no_wind).position().metres().z);
+    
+    // The headwind component (if we added one) would slow down X.
+    // We added a crosswind, so the drag force in Z will push it into Z.
+}

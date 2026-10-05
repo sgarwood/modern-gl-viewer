@@ -96,10 +96,12 @@ public:
             }
             
             Vec3 a_aero = {0.0F, 0.0F, 0.0F};
-            Vec3 v = body.velocity_.metres_per_second();
-            float v_len = length(v);
+            Vec3 v_body = body.velocity_.metres_per_second();
+            Vec3 v_wind = wind_.metres_per_second();
+            Vec3 v_air = subtract(v_body, v_wind);
+            float v_air_len = length(v_air);
             
-            if (v_len > 0.0F && body.inverse_mass() > 0.0F) {
+            if (v_air_len > 0.0F && body.inverse_mass() > 0.0F) {
                 // Approximate golf ball constants
                 const float rho = 1.225F;
                 const float r = 0.02135F;
@@ -108,19 +110,19 @@ public:
                 
                 // 1. Drag
                 const float C_d = 0.3F;
-                float drag_accel_factor = -0.5F * rho * C_d * A * v_len / mass;
-                a_aero = add(a_aero, scaled(v, drag_accel_factor));
+                float drag_accel_factor = -0.5F * rho * C_d * A * v_air_len / mass;
+                a_aero = add(a_aero, scaled(v_air, drag_accel_factor));
                 
                 // 2. Magnus Effect (Lift)
                 Vec3 omega = body.angular_velocity_.radians_per_second();
-                Vec3 lift_dir = cross(omega, v);
+                Vec3 lift_dir = cross(omega, v_air);
                 float lift_len = length(lift_dir);
                 
                 if (lift_len > 0.0F) {
                     // Simple constant lift coefficient for the vertical slice proof
                     const float C_l = 0.2F;
                     // F_lift = 0.5 * rho * C_l * A * |v|^2 * normalize(lift_dir)
-                    float lift_accel_factor = (0.5F * rho * C_l * A * (v_len * v_len)) / (mass * lift_len);
+                    float lift_accel_factor = (0.5F * rho * C_l * A * (v_air_len * v_air_len)) / (mass * lift_len);
                     a_aero = add(a_aero, scaled(lift_dir, lift_accel_factor));
                 }
             }
@@ -204,6 +206,7 @@ public:
     std::unique_ptr<CollisionDetector> collision_detector;
     std::deque<RigidBody> bodies;
     std::vector<Collision> collisions;
+    LinearVelocity wind_{};
     double accumulated_time{};
     std::uint64_t next_id{1};
 };
@@ -225,6 +228,10 @@ PhysicsWorld::PhysicsWorld(
 PhysicsWorld::~PhysicsWorld() = default;
 PhysicsWorld::PhysicsWorld(PhysicsWorld&&) noexcept = default;
 PhysicsWorld& PhysicsWorld::operator=(PhysicsWorld&&) noexcept = default;
+
+void PhysicsWorld::set_wind(LinearVelocity wind) {
+    impl_->wind_ = wind;
+}
 
 BodyId PhysicsWorld::add_body(RigidBodyDefinition definition) {
     if (impl_->next_id == std::numeric_limits<std::uint64_t>::max()) {
