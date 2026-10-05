@@ -1,0 +1,65 @@
+openapi: 3.0.3
+info:
+  title: Hardcore Golf Backend API
+  version: 1.0.0
+  description: Backend services for course fetching and live weather integration.
+paths:
+  /courses:
+    get:
+      summary: List all golf courses
+      responses:
+        '200':
+          description: A list of golf courses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Course'
+  /courses/{id}/weather:
+    get:
+      summary: Get live weather data for a specific course
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Current weather conditions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WeatherCondition'
+        '404':
+          description: Course not found
+        '400':
+          description: Validation error
+components:
+  schemas:
+    Course:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        location:
+          type: string
+        par:
+          type: integer
+    WeatherCondition:
+      type: object
+      properties:
+        temperature_c:
+          type: number
+        wind_speed_mps:
+          type: number
+        wind_direction_deg:
+          type: number
+        is_raining:
+          type: boolean
+        turf_wetness:
+          type: number
+          description: 0.0 (dry) to 1.0 (flooded)
