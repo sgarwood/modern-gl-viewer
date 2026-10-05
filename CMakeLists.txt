@@ -96,6 +96,8 @@ add_library(mgv_network
     src/network/datagram.cpp
     src/network/network_service.cpp
     src/network/udp_transport.cpp
+    src/network/environment_system.cpp
+    src/network/http_backend_client.cpp
 )
 add_library(mgv::network ALIAS mgv_network)
 target_compile_features(mgv_network PUBLIC cxx_std_20)
