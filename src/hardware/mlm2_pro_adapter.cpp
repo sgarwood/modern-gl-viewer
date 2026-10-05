@@ -84,14 +84,13 @@ void Mlm2ProAdapter::stop() {
 
 void Mlm2ProAdapter::simulate_shot_received(float speed, float launch, float direction, float spin, float axis) {
     if (is_running_ && callback_) {
-        ShotData data{};
+        FullSwingData data{};
         data.ball_speed_mps = speed;
         data.launch_angle_deg = launch;
         data.launch_direction_deg = direction;
         data.total_spin_rpm = spin;
         data.spin_axis_deg = axis;
-        data.is_putt = false;
-        callback_(data);
+        callback_(ShotData{data});
     }
 }
 

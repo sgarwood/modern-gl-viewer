@@ -18,7 +18,7 @@ public:
     void stop() override;
 
     // Test/Debug hook
-    void simulate_putt_received(float speed, float launch, float direction, float spin, float axis);
+    void simulate_putt_received(float speed_mps, float face_deg, float twist_deg, float lie_deg, float lean_deg, float loft_deg);
 
 private:
     void handle_gatt_payload(const std::vector<uint8_t>& payload);
