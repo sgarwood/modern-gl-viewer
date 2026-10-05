@@ -93,38 +93,34 @@ void Mlm2ProAdapter::simulate_shot_received(float speed, float launch, float dir
     }
 }
 
+#include "mgv/hardware/json.hpp"
+
 void Mlm2ProAdapter::parse_json_payload(const std::string& payload) {
-    // A crude fallback JSON parser specifically for the expected GSPro keys
-    // In production, nlohmann/json or simdjson should be used.
-    auto extract_float = [&](const std::string& key) -> float {
-        size_t pos = payload.find(key);
-        if (pos == std::string::npos) return 0.0f;
-        pos = payload.find(':', pos);
-        if (pos == std::string::npos) return 0.0f;
-        try {
-            return std::stof(payload.substr(pos + 1));
-        } catch (...) {
-            return 0.0f;
-        }
-    };
+    try {
+        auto j = nlohmann::json::parse(payload);
+        
+        if (j.contains("BallData") && j["BallData"].is_object()) {
+            const auto& ball_data = j["BallData"];
+            
+            float speed_mph = ball_data.value("Speed", 0.0f);
+            float hla = ball_data.value("HLA", 0.0f);
+            float vla = ball_data.value("VLA", 0.0f);
+            float total_spin = ball_data.value("TotalSpin", 0.0f);
+            float spin_axis = ball_data.value("SpinAxis", 0.0f);
 
-    if (payload.find("BallData") != std::string::npos) {
-        float speed_mph = extract_float("\"Speed\"");
-        float hla = extract_float("\"HLA\"");
-        float vla = extract_float("\"VLA\"");
-        float total_spin = extract_float("\"TotalSpin\"");
-        float spin_axis = extract_float("\"SpinAxis\"");
-
-        if (callback_ && is_running_) {
-            ShotData data{};
-            data.ball_speed_mps = speed_mph * 0.44704f; // MPH to m/s
-            data.launch_angle_deg = vla;
-            data.launch_direction_deg = hla;
-            data.total_spin_rpm = total_spin;
-            data.spin_axis_deg = spin_axis;
-            data.is_putt = false;
-            callback_(data);
+            if (callback_ && is_running_) {
+                ShotData data{};
+                data.ball_speed_mps = speed_mph * 0.44704f; // MPH to m/s
+                data.launch_angle_deg = vla;
+                data.launch_direction_deg = hla;
+                data.total_spin_rpm = total_spin;
+                data.spin_axis_deg = spin_axis;
+                data.is_putt = false;
+                callback_(data);
+            }
         }
+    } catch (const nlohmann::json::parse_error& /*e*/) {
+        // Silently drop malformed payloads rather than crashing the network listener
     }
 }
 
