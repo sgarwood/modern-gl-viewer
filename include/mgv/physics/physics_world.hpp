@@ -31,6 +31,8 @@ public:
     PhysicsWorld& operator=(const PhysicsWorld&) = delete;
 
     [[nodiscard]] BodyId add_body(RigidBodyDefinition definition);
+    [[nodiscard]] bool remove_body(BodyId id);
+    [[nodiscard]] bool contains(BodyId id) const noexcept;
     [[nodiscard]] const RigidBody& body(BodyId id) const;
     [[nodiscard]] std::span<const Collision> collisions() const noexcept;
 

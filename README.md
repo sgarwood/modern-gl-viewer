@@ -28,6 +28,8 @@ types.
 - Injectable sphere/AABB collision detection with penetration correction and restitution impulses.
 - Optional `mgv::network` domain with a RAII `std::jthread` service and real IPv4 UDP transport.
 - Dependency-inverted network I/O, bounded message queues, backpressure, and failure events.
+- Pimpl `Engine` runtime with stable `EntityId`/`RenderableId` handles and queued typed commands.
+- Injectable monotonic clock, physics-to-render bindings, and main-thread network-event decoding.
 - Validated RGBA8 image data, linear/sRGB colour spaces, sampler descriptions, and RAII texture
   resources.
 - `MaterialInstance` keeps named texture bindings separate from immutable material pipelines.
@@ -43,6 +45,9 @@ The physics domain model, unit contract, and current MVP boundaries are document
 
 The networking ownership, threading, and shutdown contracts are documented in
 [`docs/networking.md`](docs/networking.md).
+
+Runtime orchestration, stable handles, tick ordering, and frontend boundaries are documented in
+[`docs/runtime.md`](docs/runtime.md).
 
 Cross-platform CircleCI builds and the manually triggered Debian/MSI prerelease process are
 documented in [`docs/releasing.md`](docs/releasing.md).
@@ -163,21 +168,21 @@ omit it. Asset loads also provide optional `sampler2D uBaseColorTexture` and
 ## Architecture
 
 ```text
-Qt / GLFW adapter -> InputSink <- OrbitCameraController -> CameraTarget <- Renderer -> Camera
-QML menu -> MainMenuController -> EngineLauncher -> QtViewerWindow -> Renderer
-Qt / GLFW host    -> OpenGL backend -> RenderBackend <------------------- Renderer
+Qt / GLFW adapter -> queued EngineCommand -> Engine -> OrbitCameraController -> Renderer
+QML menu -> MainMenuController -> EngineLauncher -> QtViewerWindow -> Engine
+Qt / GLFW host    -> OpenGL backend -> RenderBackend <----------------------- Renderer
 Scene -> Renderable -> Transform / MeshData / MaterialInstance --------> Renderer
                                       |-> Material -> Pipeline
                                       |-> Texture -> Image / Sampler
-Input / gameplay -> PhysicsWorld -> RigidBody / CollisionDetector
-                                      |-> Position -> Renderer transform update
-Frontend / gameplay -> NetworkService -> bounded queues -> DatagramTransport -> UDP socket
+Engine -> PhysicsWorld -> RigidBody / CollisionDetector
+          |-> BodyId bound to EntityId/RenderableId -> Renderer transform update
+NetworkService -> NetworkEventSource -> NetworkEventDecoder -> queued EngineCommand
 ```
 
 The CMake targets mirror these boundaries: `mgv::core`, `mgv::physics`, `mgv::network`,
-`mgv::opengl`, `mgv::qt_frontend`, and the optional QML/Qt/GLFW entrypoints. A future Vulkan or
-Direct3D adapter can replace `mgv::opengl` without changing OBJ, camera, shader-file, networking, or
-scene orchestration code.
+`mgv::runtime`, `mgv::opengl`, `mgv::qt_frontend`, and the optional QML/Qt/GLFW entrypoints. A
+future Vulkan or Direct3D adapter can replace `mgv::opengl` without changing OBJ, camera,
+shader-file, networking, or scene orchestration code.
 
 `Scene` objects use shared immutable meshes, material pipelines, and textures. A `MaterialInstance`
 contains per-material named bindings without duplicating pipeline state. When a scene is submitted,

@@ -190,6 +190,20 @@ BodyId PhysicsWorld::add_body(RigidBodyDefinition definition) {
     return id;
 }
 
+bool PhysicsWorld::remove_body(BodyId id) {
+    const auto found = std::ranges::find(impl_->bodies, id, &RigidBody::id);
+    if (found == impl_->bodies.end()) {
+        return false;
+    }
+    impl_->bodies.erase(found);
+    impl_->collisions.clear();
+    return true;
+}
+
+bool PhysicsWorld::contains(BodyId id) const noexcept {
+    return std::ranges::find(impl_->bodies, id, &RigidBody::id) != impl_->bodies.end();
+}
+
 const RigidBody& PhysicsWorld::body(BodyId id) const {
     return impl_->find(id);
 }

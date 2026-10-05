@@ -27,8 +27,9 @@ prevents an unbounded catch-up loop.
 Example:
 
 ```cpp
-mgv::physics::PhysicsWorld world;
-const auto ball = world.add_body(
+const auto ball_entity = engine.set_scene(std::move(scene)).front();
+const auto ball_body = engine.bind_physics(
+    ball_entity,
     mgv::physics::RigidBodyBuilder{
         mgv::physics::Collider::sphere(mgv::physics::Length{0.5F})}
         .at(mgv::physics::Position{{0.0F, 5.0F, 0.0F}})
@@ -36,11 +37,12 @@ const auto ball = world.add_body(
         .restitution(0.7F)
         .build());
 
-world.simulate(mgv::physics::Duration{frame_seconds});
-const auto position = world.body(ball).position().metres();
-mgv::Transform transform;
-renderer.set_renderable_transform(0, transform.set_position(position));
+engine.tick({framebuffer_width, framebuffer_height});
 ```
+
+`Engine` retains the `BodyId`-to-`RenderableId` binding and copies the simulated position to the
+render transform after each fixed physics step. The returned `ball_body` handle remains available
+to domain code that needs to identify the body.
 
 This first slice deliberately excludes angular motion, friction, constraints, continuous collision
 detection, sleeping, and a spatial broad phase. Collision pairs are currently evaluated in

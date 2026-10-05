@@ -1,6 +1,6 @@
 #include "mgv/application.hpp"
 
-#include "mgv/camera_controller.hpp"
+#include "mgv/engine.hpp"
 #include "mgv/opengl_backend.hpp"
 
 #define GLFW_INCLUDE_NONE
@@ -68,11 +68,10 @@ struct Application::Impl final {
         : window{create_window(config.width, config.height, config.title)} {
         glfwMakeContextCurrent(window.get());
         glfwSwapInterval(1);
-        renderer = std::make_unique<Renderer>(make_opengl_backend([](const char* name) {
+        engine = std::make_unique<Engine>(make_opengl_backend([](const char* name) {
             return glfwGetProcAddress(name);
         }));
-        renderer->load(config.assets);
-        input = make_orbit_camera_controller(*renderer);
+        engine->load(config.assets);
         glfwSetWindowUserPointer(window.get(), this);
         glfwSetKeyCallback(window.get(), [](GLFWwindow* native_window, int key, int, int action, int) {
             if (action != GLFW_PRESS && action != GLFW_REPEAT) {
@@ -81,28 +80,28 @@ struct Application::Impl final {
             auto& application = *static_cast<Impl*>(glfwGetWindowUserPointer(native_window));
             switch (key) {
             case GLFW_KEY_LEFT:
-                application.input->handle(InputAction::orbit_left);
+                application.engine->enqueue(InputAction::orbit_left);
                 break;
             case GLFW_KEY_RIGHT:
-                application.input->handle(InputAction::orbit_right);
+                application.engine->enqueue(InputAction::orbit_right);
                 break;
             case GLFW_KEY_UP:
-                application.input->handle(InputAction::orbit_up);
+                application.engine->enqueue(InputAction::orbit_up);
                 break;
             case GLFW_KEY_DOWN:
-                application.input->handle(InputAction::orbit_down);
+                application.engine->enqueue(InputAction::orbit_down);
                 break;
             case GLFW_KEY_EQUAL:
             case GLFW_KEY_KP_ADD:
-                application.input->handle(InputAction::zoom_in);
+                application.engine->enqueue(InputAction::zoom_in);
                 break;
             case GLFW_KEY_MINUS:
             case GLFW_KEY_KP_SUBTRACT:
-                application.input->handle(InputAction::zoom_out);
+                application.engine->enqueue(InputAction::zoom_out);
                 break;
             case GLFW_KEY_HOME:
             case GLFW_KEY_R:
-                application.input->handle(InputAction::reset_view);
+                application.engine->enqueue(InputAction::reset_view);
                 break;
             default:
                 break;
@@ -110,11 +109,10 @@ struct Application::Impl final {
         });
     }
 
-    // Declaration order is intentional: input and GL resources die before the context and GLFW runtime.
+    // Declaration order is intentional: engine GL resources die before the context and GLFW runtime.
     GlfwRuntime runtime;
     Window window;
-    std::unique_ptr<Renderer> renderer;
-    std::unique_ptr<InputSink> input;
+    std::unique_ptr<Engine> engine;
 };
 
 Application::Application(Config config) : impl_{std::make_unique<Impl>(std::move(config))} {}
@@ -132,10 +130,9 @@ int Application::run() {
         int width{};
         int height{};
         glfwGetFramebufferSize(impl_->window.get(), &width, &height);
-        impl_->renderer->render({
+        impl_->engine->tick({
             .framebuffer_width = std::max(width, 1),
             .framebuffer_height = std::max(height, 1),
-            .elapsed_seconds = static_cast<float>(glfwGetTime()),
         });
         glfwSwapBuffers(impl_->window.get());
     }

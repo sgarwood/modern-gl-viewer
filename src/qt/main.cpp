@@ -1,6 +1,5 @@
 #include "qt_viewer_window.hpp"
 
-#include "mgv/renderer.hpp"
 #include "mgv/runtime_paths.hpp"
 
 #include <QApplication>

@@ -2,8 +2,6 @@
 
 #include "qt_viewer_widget.hpp"
 
-#include "mgv/input.hpp"
-
 #include <QAction>
 #include <QFileDialog>
 #include <QMenu>

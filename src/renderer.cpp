@@ -187,8 +187,10 @@ namespace {
 }
 
 struct GpuRenderable final {
+    RenderableId id;
     MeshResource* mesh{};
     RenderPipelineResource* pipeline{};
+    Transform transform;
     Mat4 model_matrix{};
     std::vector<SampledTextureBinding> textures;
     std::vector<ColorBinding> colors;
@@ -253,17 +255,17 @@ Renderer::~Renderer() = default;
 Renderer::Renderer(Renderer&&) noexcept = default;
 Renderer& Renderer::operator=(Renderer&&) noexcept = default;
 
-void Renderer::load(const AssetPaths& paths) {
-    set_scene(make_imported_scene(
+std::vector<RenderableId> Renderer::load(const AssetPaths& paths) {
+    return set_scene(make_imported_scene(
         ObjLoader{}.load_model(paths.model),
         ShaderLoader::load(paths.vertex_shader, paths.fragment_shader)));
 }
 
-void Renderer::load(MeshData mesh, ShaderSources shaders) {
-    set_scene(make_single_renderable_scene(std::move(mesh), std::move(shaders)));
+std::vector<RenderableId> Renderer::load(MeshData mesh, ShaderSources shaders) {
+    return set_scene(make_single_renderable_scene(std::move(mesh), std::move(shaders)));
 }
 
-void Renderer::set_scene(Scene scene) {
+std::vector<RenderableId> Renderer::set_scene(Scene scene) {
     if (scene.empty()) {
         throw std::invalid_argument{"Cannot render an empty scene"};
     }
@@ -280,7 +282,8 @@ void Renderer::set_scene(Scene scene) {
 
     const auto capabilities = impl_->backend->capabilities();
 
-    for (const auto& renderable : scene.renderables()) {
+    for (std::size_t index = 0; index < scene.size(); ++index) {
+        const auto& renderable = scene.renderables()[index];
         const auto* mesh_key = renderable.mesh().get();
         auto gpu_mesh = mesh_cache.contains(mesh_key) ? mesh_cache.at(mesh_key) : GpuMesh{};
         if (gpu_mesh.resource == nullptr) {
@@ -347,8 +350,10 @@ void Renderer::set_scene(Scene scene) {
         }
 
         renderables.push_back({
+            .id = scene.renderable_ids()[index],
             .mesh = gpu_mesh.resource,
             .pipeline = gpu_pipeline,
+            .transform = renderable.transform(),
             .model_matrix = renderable.transform().matrix(),
             .textures = std::move(gpu_texture_bindings),
             .colors = std::move(gpu_color_bindings),
@@ -367,17 +372,43 @@ void Renderer::set_scene(Scene scene) {
     impl_->queue.reserve(impl_->renderables.size());
     impl_->statistics = {};
     impl_->scene_loaded = true;
+
+    std::vector<RenderableId> ids;
+    ids.reserve(impl_->renderables.size());
+    for (const auto& renderable : impl_->renderables) {
+        ids.push_back(renderable.id);
+    }
+    return ids;
 }
 
 void Renderer::set_camera(Camera camera) {
     impl_->camera = std::move(camera);
 }
 
-void Renderer::set_renderable_transform(std::size_t index, Transform transform) {
-    if (index >= impl_->renderables.size()) {
-        throw std::out_of_range{"Renderable index is out of range"};
+void Renderer::remove_renderable(RenderableId id) {
+    const auto found = std::ranges::find(impl_->renderables, id, &GpuRenderable::id);
+    if (found == impl_->renderables.end()) {
+        throw std::out_of_range{"Unknown renderable identifier"};
     }
-    impl_->renderables[index].model_matrix = transform.matrix();
+    impl_->renderables.erase(found);
+    impl_->queue.clear();
+}
+
+void Renderer::set_renderable_transform(RenderableId id, Transform transform) {
+    const auto found = std::ranges::find(impl_->renderables, id, &GpuRenderable::id);
+    if (found == impl_->renderables.end()) {
+        throw std::out_of_range{"Unknown renderable identifier"};
+    }
+    found->model_matrix = transform.matrix();
+    found->transform = std::move(transform);
+}
+
+Transform Renderer::renderable_transform(RenderableId id) const {
+    const auto found = std::ranges::find(impl_->renderables, id, &GpuRenderable::id);
+    if (found == impl_->renderables.end()) {
+        throw std::out_of_range{"Unknown renderable identifier"};
+    }
+    return found->transform;
 }
 
 Camera Renderer::camera() const {

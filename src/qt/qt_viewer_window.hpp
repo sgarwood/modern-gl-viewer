@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mgv/renderer.hpp"
+#include "mgv/engine.hpp"
 
 #include <QMainWindow>
 

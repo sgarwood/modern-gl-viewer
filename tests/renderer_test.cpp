@@ -284,18 +284,49 @@ TEST_CASE("renderer updates a transform without recreating backend resources") {
                      {{0.0F, 0.5F, 0.0F}, {}, {}}},
         .indices = {0, 1, 2},
     };
-    renderer.load(std::move(mesh), {"vertex", "fragment", "test.vert", "test.frag"});
+    const auto renderables = renderer.load(
+        std::move(mesh), {"vertex", "fragment", "test.vert", "test.frag"});
+    REQUIRE(renderables.size() == 1);
     mgv::Transform outside;
     outside.set_position({100.0F, 0.0F, 0.0F});
 
-    renderer.set_renderable_transform(0, outside);
+    renderer.set_renderable_transform(renderables.front(), outside);
     renderer.render({});
 
     CHECK(calls.meshes == 1);
     CHECK(calls.pipelines == 1);
     CHECK(calls.draws == 0);
     CHECK(renderer.last_frame_statistics().culled == 1);
-    CHECK_THROWS_AS(renderer.set_renderable_transform(1, {}), std::out_of_range);
+    CHECK_THROWS_AS(
+        renderer.set_renderable_transform(mgv::RenderableId{999'999}, {}),
+        std::out_of_range);
+}
+
+TEST_CASE("renderer handles survive erasure without index aliasing") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    const auto mesh = std::make_shared<const mgv::MeshData>(mgv::MeshData{
+        .vertices = {{{-0.5F, -0.5F, 0.0F}, {}, {}},
+                     {{0.5F, -0.5F, 0.0F}, {}, {}},
+                     {{0.0F, 0.5F, 0.0F}, {}, {}}},
+        .indices = {0, 1, 2},
+    });
+    const auto material = std::make_shared<const mgv::MaterialInstance>(
+        std::make_shared<const mgv::Material>(
+            mgv::ShaderSources{"vertex", "fragment", "test.vert", "test.frag"}));
+    mgv::Scene scene;
+    const auto removed = scene.add(mgv::Renderable{mesh, material});
+    const auto retained = scene.add(mgv::Renderable{mesh, material});
+    renderer.set_scene(std::move(scene));
+
+    renderer.remove_renderable(removed);
+    mgv::Transform moved;
+    moved.set_position({1.0F, 0.0F, 0.0F});
+    renderer.set_renderable_transform(retained, moved);
+    renderer.render({});
+
+    CHECK(calls.draws == 1);
+    CHECK_THROWS_AS(renderer.set_renderable_transform(removed, {}), std::out_of_range);
 }
 
 TEST_CASE("renderer queues opaque front-to-back before translucent back-to-front") {

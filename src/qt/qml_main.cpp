@@ -1,7 +1,6 @@
 #include "main_menu_controller.hpp"
 #include "qt_engine_launcher.hpp"
 
-#include "mgv/renderer.hpp"
 #include "mgv/runtime_paths.hpp"
 
 #include <QApplication>

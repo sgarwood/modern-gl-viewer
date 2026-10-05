@@ -35,9 +35,23 @@ struct NetworkStatistics final {
     std::uint64_t transport_failures{};
 };
 
+class NetworkEventSource {
+public:
+    virtual ~NetworkEventSource() = default;
+    NetworkEventSource(const NetworkEventSource&) = delete;
+    NetworkEventSource& operator=(const NetworkEventSource&) = delete;
+
+    [[nodiscard]] virtual std::optional<NetworkEvent> poll_event() = 0;
+
+protected:
+    NetworkEventSource() = default;
+    NetworkEventSource(NetworkEventSource&&) noexcept = default;
+    NetworkEventSource& operator=(NetworkEventSource&&) noexcept = default;
+};
+
 class NetworkServiceImpl;
 
-class NetworkService final {
+class NetworkService final : public NetworkEventSource {
 public:
     explicit NetworkService(
         std::unique_ptr<DatagramTransport> transport,
@@ -50,7 +64,7 @@ public:
     NetworkService& operator=(const NetworkService&) = delete;
 
     [[nodiscard]] bool try_send(Datagram datagram);
-    [[nodiscard]] std::optional<NetworkEvent> poll_event();
+    [[nodiscard]] std::optional<NetworkEvent> poll_event() override;
     [[nodiscard]] std::optional<NetworkEvent> wait_for_event(
         std::chrono::milliseconds timeout);
     [[nodiscard]] bool running() const noexcept;

@@ -1,9 +1,7 @@
 #pragma once
 
-#include "mgv/input.hpp"
-#include "mgv/renderer.hpp"
+#include "mgv/engine.hpp"
 
-#include <QElapsedTimer>
 #include <QOpenGLWidget>
 #include <QString>
 #include <QTimer>
@@ -35,9 +33,7 @@ private:
     void show_error(const std::exception& error);
 
     mgv::AssetPaths assets_;
-    std::unique_ptr<mgv::Renderer> renderer_;
-    std::unique_ptr<mgv::InputSink> input_;
-    QElapsedTimer elapsed_;
+    std::unique_ptr<mgv::Engine> engine_;
     QTimer animation_timer_;
     QString error_;
 };

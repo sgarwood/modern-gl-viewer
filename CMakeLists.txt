@@ -94,6 +94,20 @@ if(WIN32)
     target_link_libraries(mgv_network PRIVATE ws2_32)
 endif()
 
+add_library(mgv_runtime
+    src/engine.cpp
+)
+add_library(mgv::runtime ALIAS mgv_runtime)
+target_compile_features(mgv_runtime PUBLIC cxx_std_20)
+target_include_directories(mgv_runtime PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include>"
+)
+target_link_libraries(mgv_runtime
+    PUBLIC mgv::core mgv::network mgv::physics
+    PRIVATE mgv::project_warnings
+)
+
 if(MGV_BUILD_QT_APP OR MGV_BUILD_QML_APP)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets OpenGLWidgets)
 endif()
@@ -147,7 +161,7 @@ if(MGV_BUILD_GLFW_APP)
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     )
     target_link_libraries(mgv_glfw_app
-        PUBLIC mgv::core
+        PUBLIC mgv::runtime
         PRIVATE mgv::opengl glfw mgv::project_warnings
     )
 
@@ -177,7 +191,7 @@ if(MGV_BUILD_QT_APP OR MGV_BUILD_QML_APP)
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/qt>"
     )
     target_link_libraries(mgv_qt_frontend
-        PUBLIC mgv::core Qt6::Core
+        PUBLIC mgv::runtime Qt6::Core
         PRIVATE mgv::opengl mgv::project_warnings Qt6::Widgets Qt6::OpenGLWidgets
     )
 endif()
@@ -255,6 +269,7 @@ if(BUILD_TESTING)
         tests/bounds_test.cpp
         tests/camera_test.cpp
         tests/camera_controller_test.cpp
+        tests/engine_test.cpp
         tests/image_loader_test.cpp
         tests/obj_loader_test.cpp
         tests/network/datagram_test.cpp
@@ -273,9 +288,7 @@ if(BUILD_TESTING)
     )
     target_compile_features(mgv_tests PRIVATE cxx_std_20)
     target_link_libraries(mgv_tests PRIVATE
-        mgv::core
-        mgv::network
-        mgv::physics
+        mgv::runtime
         mgv::project_warnings
         Catch2::Catch2WithMain
     )

@@ -4,11 +4,18 @@
 #include "mgv/mesh.hpp"
 #include "mgv/transform.hpp"
 
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <vector>
 
 namespace mgv {
+
+struct RenderableId final {
+    std::uint64_t value{};
+
+    friend bool operator==(const RenderableId&, const RenderableId&) = default;
+};
 
 class Renderable final {
 public:
@@ -34,13 +41,19 @@ private:
 
 class Scene final {
 public:
-    Renderable& add(Renderable renderable);
+    RenderableId add(Renderable renderable);
+    [[nodiscard]] bool remove(RenderableId id);
+    [[nodiscard]] bool contains(RenderableId id) const noexcept;
+    [[nodiscard]] Renderable& renderable(RenderableId id);
+    [[nodiscard]] const Renderable& renderable(RenderableId id) const;
     [[nodiscard]] std::span<const Renderable> renderables() const noexcept;
+    [[nodiscard]] std::span<const RenderableId> renderable_ids() const noexcept;
     [[nodiscard]] bool empty() const noexcept;
     [[nodiscard]] std::size_t size() const noexcept;
 
 private:
     std::vector<Renderable> renderables_;
+    std::vector<RenderableId> renderable_ids_;
 };
 
 } // namespace mgv

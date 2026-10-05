@@ -96,6 +96,23 @@ TEST_CASE("physics world rejects unknown body identifiers") {
     CHECK_THROWS_AS(world.body(mgv::physics::BodyId{42}), std::out_of_range);
 }
 
+TEST_CASE("physics body handles are not aliased after removal") {
+    mgv::physics::PhysicsWorld world;
+    const auto removed = world.add_body(
+        sphere(mgv::physics::MotionType::dynamic, {}));
+    const auto retained = world.add_body(
+        sphere(mgv::physics::MotionType::dynamic, {3.0F, 0.0F, 0.0F}));
+
+    CHECK(world.remove_body(removed));
+    CHECK_FALSE(world.contains(removed));
+    CHECK(world.contains(retained));
+    CHECK_THROWS_AS(world.body(removed), std::out_of_range);
+
+    const auto replacement = world.add_body(
+        sphere(mgv::physics::MotionType::dynamic, {6.0F, 0.0F, 0.0F}));
+    CHECK(replacement != removed);
+}
+
 TEST_CASE("physics world applies strongly typed impulses only to dynamic bodies") {
     mgv::physics::PhysicsConfiguration configuration;
     configuration.gravity = mgv::physics::Acceleration{{}};

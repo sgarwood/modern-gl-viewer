@@ -29,12 +29,31 @@ TEST_CASE("scene stores validated renderables and their transforms") {
     transform.set_position({1.0F, 2.0F, 3.0F});
     mgv::Scene scene;
 
-    auto& renderable = scene.add(mgv::Renderable{triangle_mesh(), material(), transform});
+    const auto id = scene.add(mgv::Renderable{triangle_mesh(), material(), transform});
 
     REQUIRE(scene.size() == 1);
     CHECK(!scene.empty());
-    CHECK(renderable.transform().position() == mgv::Vec3{1.0F, 2.0F, 3.0F});
+    CHECK(scene.renderable(id).transform().position() == mgv::Vec3{1.0F, 2.0F, 3.0F});
     CHECK(scene.renderables().front().visible());
+}
+
+TEST_CASE("scene handles remain stable when other renderables are removed") {
+    mgv::Scene scene;
+    const auto removed = scene.add(mgv::Renderable{triangle_mesh(), material()});
+    const auto retained = scene.add(mgv::Renderable{triangle_mesh(), material()});
+
+    CHECK(scene.remove(removed));
+    CHECK_FALSE(scene.contains(removed));
+    CHECK(scene.contains(retained));
+    CHECK_THROWS_AS(scene.renderable(removed), std::out_of_range);
+
+    mgv::Transform moved;
+    moved.set_position({4.0F, 5.0F, 6.0F});
+    scene.renderable(retained).set_transform(moved);
+    const auto replacement = scene.add(mgv::Renderable{triangle_mesh(), material()});
+
+    CHECK(replacement != removed);
+    CHECK(scene.renderable(retained).transform().position() == mgv::Vec3{4.0F, 5.0F, 6.0F});
 }
 
 TEST_CASE("renderable rejects missing or empty resources") {

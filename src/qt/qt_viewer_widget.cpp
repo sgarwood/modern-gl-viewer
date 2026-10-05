@@ -1,6 +1,5 @@
 #include "qt_viewer_widget.hpp"
 
-#include "mgv/camera_controller.hpp"
 #include "mgv/opengl_backend.hpp"
 
 #include <QByteArray>
@@ -29,17 +28,14 @@ QtViewerWidget::~QtViewerWidget() {
 
 void QtViewerWidget::load_assets(mgv::AssetPaths assets) {
     assets_ = std::move(assets);
-    if (!renderer_) {
+    if (!engine_) {
         return;
     }
 
     makeCurrent();
     try {
-        renderer_->load(assets_);
+        engine_->load(assets_);
         error_.clear();
-        if (!elapsed_.isValid()) {
-            elapsed_.start();
-        }
         animation_timer_.start();
     } catch (const std::exception& error) {
         show_error(error);
@@ -49,10 +45,10 @@ void QtViewerWidget::load_assets(mgv::AssetPaths assets) {
 }
 
 void QtViewerWidget::handle_input(mgv::InputAction action) {
-    if (!input_) {
+    if (!engine_) {
         return;
     }
-    input_->handle(action);
+    engine_->enqueue(action);
     update();
 }
 
@@ -64,14 +60,12 @@ void QtViewerWidget::initializeGL() {
     connect(context(), &QOpenGLContext::aboutToBeDestroyed, this, [this] { cleanup(); }, Qt::DirectConnection);
 
     try {
-        renderer_ = std::make_unique<mgv::Renderer>(mgv::make_opengl_backend([](const char* name) {
+        engine_ = std::make_unique<mgv::Engine>(mgv::make_opengl_backend([](const char* name) {
             const auto* current = QOpenGLContext::currentContext();
             return current == nullptr ? nullptr : current->getProcAddress(QByteArray{name});
         }));
-        input_ = mgv::make_orbit_camera_controller(*renderer_);
-        renderer_->load(assets_);
+        engine_->load(assets_);
         error_.clear();
-        elapsed_.start();
         animation_timer_.start();
     } catch (const std::exception& error) {
         show_error(error);
@@ -79,13 +73,12 @@ void QtViewerWidget::initializeGL() {
 }
 
 void QtViewerWidget::paintGL() {
-    if (renderer_ && error_.isEmpty()) {
+    if (engine_ && error_.isEmpty()) {
         try {
             const auto scale = devicePixelRatioF();
-            renderer_->render({
+            engine_->tick({
                 .framebuffer_width = std::max(1, static_cast<int>(std::lround(static_cast<double>(width()) * scale))),
                 .framebuffer_height = std::max(1, static_cast<int>(std::lround(static_cast<double>(height()) * scale))),
-                .elapsed_seconds = static_cast<float>(elapsed_.elapsed()) / 1000.0F,
             });
             return;
         } catch (const std::exception& error) {
@@ -132,12 +125,11 @@ void QtViewerWidget::keyPressEvent(QKeyEvent* event) {
 }
 
 void QtViewerWidget::cleanup() {
-    input_.reset();
-    if (!renderer_) {
+    if (!engine_) {
         return;
     }
     makeCurrent();
-    renderer_.reset();
+    engine_.reset();
     doneCurrent();
 }
 

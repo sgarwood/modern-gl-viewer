@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <memory>
+#include <vector>
 
 namespace mgv {
 
@@ -35,10 +36,12 @@ public:
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
 
-    void load(const AssetPaths& paths);
-    void load(MeshData mesh, ShaderSources shaders);
-    void set_scene(Scene scene);
-    void set_renderable_transform(std::size_t index, Transform transform);
+    std::vector<RenderableId> load(const AssetPaths& paths);
+    std::vector<RenderableId> load(MeshData mesh, ShaderSources shaders);
+    std::vector<RenderableId> set_scene(Scene scene);
+    void remove_renderable(RenderableId id);
+    void set_renderable_transform(RenderableId id, Transform transform);
+    [[nodiscard]] Transform renderable_transform(RenderableId id) const;
     void set_camera(Camera camera) override;
     [[nodiscard]] Camera camera() const override;
     void render(const Frame& frame);
