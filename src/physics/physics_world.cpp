@@ -28,6 +28,18 @@ namespace {
     return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
 }
 
+[[nodiscard]] Vec3 cross(Vec3 lhs, Vec3 rhs) {
+    return {
+        lhs.y * rhs.z - lhs.z * rhs.y,
+        lhs.z * rhs.x - lhs.x * rhs.z,
+        lhs.x * rhs.y - lhs.y * rhs.x
+    };
+}
+
+[[nodiscard]] float length(Vec3 v) {
+    return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+}
+
 } // namespace
 
 class PhysicsWorldImpl final {
@@ -82,9 +94,42 @@ public:
             if (body.motion_ == MotionType::static_body) {
                 continue;
             }
+            
+            Vec3 a_aero = {0.0F, 0.0F, 0.0F};
+            Vec3 v = body.velocity_.metres_per_second();
+            float v_len = length(v);
+            
+            if (v_len > 0.0F && body.inverse_mass() > 0.0F) {
+                // Approximate golf ball constants
+                const float rho = 1.225F;
+                const float r = 0.02135F;
+                const float A = 3.14159265F * r * r;
+                const float mass = body.mass_.kilograms();
+                
+                // 1. Drag
+                const float C_d = 0.3F;
+                float drag_accel_factor = -0.5F * rho * C_d * A * v_len / mass;
+                a_aero = add(a_aero, scaled(v, drag_accel_factor));
+                
+                // 2. Magnus Effect (Lift)
+                Vec3 omega = body.angular_velocity_.radians_per_second();
+                Vec3 lift_dir = cross(omega, v);
+                float lift_len = length(lift_dir);
+                
+                if (lift_len > 0.0F) {
+                    // Simple constant lift coefficient for the vertical slice proof
+                    const float C_l = 0.2F;
+                    // F_lift = 0.5 * rho * C_l * A * |v|^2 * normalize(lift_dir)
+                    float lift_accel_factor = (0.5F * rho * C_l * A * (v_len * v_len)) / (mass * lift_len);
+                    a_aero = add(a_aero, scaled(lift_dir, lift_accel_factor));
+                }
+            }
+
+            const auto total_acceleration = add(gravity, a_aero);
+            
             const auto velocity = add(
                 body.velocity_.metres_per_second(),
-                scaled(gravity, time_step));
+                scaled(total_acceleration, time_step));
             const auto position = add(
                 body.position_.metres(),
                 scaled(velocity, time_step));
