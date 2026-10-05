@@ -324,6 +324,7 @@ if(BUILD_TESTING)
         tests/network/datagram_test.cpp
         tests/network/network_service_test.cpp
         tests/network/udp_transport_test.cpp
+        tests/network/http_backend_test.cpp
         tests/hardware/launch_monitor_test.cpp
         tests/physics/collider_test.cpp
         tests/physics/collision_detector_test.cpp
