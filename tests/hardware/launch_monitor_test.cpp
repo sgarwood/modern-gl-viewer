@@ -31,8 +31,26 @@ TEST_CASE("MLM2PRO adapter can trigger a simulated shot callback") {
     CHECK(received_shot->is_putt == false);
 }
 
-TEST_CASE("Vertex adapter can trigger a simulated putt callback") {
-    VertexAdapter adapter;
+class MockVertexBleScanner : public IVertexBleScanner {
+public:
+    void set_payload_callback(PayloadCallback callback) override {
+        callback_ = callback;
+    }
+    void start() override {}
+    void stop() override {}
+
+    void simulate_gatt_notification(const std::vector<uint8_t>& bytes) {
+        if (callback_) callback_(bytes);
+    }
+private:
+    PayloadCallback callback_;
+};
+
+TEST_CASE("Vertex adapter parses GATT BLE payload into putt ShotData") {
+    auto mock_scanner = std::make_unique<MockVertexBleScanner>();
+    auto* scanner_ptr = mock_scanner.get();
+    
+    VertexAdapter adapter{std::move(mock_scanner)};
     std::optional<ShotData> received_shot;
 
     adapter.set_callback([&](const ShotData& data) {
@@ -41,14 +59,22 @@ TEST_CASE("Vertex adapter can trigger a simulated putt callback") {
 
     adapter.start();
     
-    // Simulate receiving Bluetooth data
-    adapter.simulate_putt_received(10.0F, 0.0F, 0.5F, 50.0F, 0.0F);
+    // Create a mock 8-byte payload matching our struct hypothesis
+    // Speed: 2500 mm/s (0x09C4) -> little endian: 0xC4, 0x09
+    // Face Angle: -15 tenths of a degree (-1.5 deg) (0xFFF1) -> little endian: 0xF1, 0xFF
+    // Club Path: 10 tenths of a degree (0x000A) -> 0x0A, 0x00
+    // Attack Angle: 0 (0x0000) -> 0x00, 0x00
+    std::vector<uint8_t> payload = {0xC4, 0x09, 0xF1, 0xFF, 0x0A, 0x00, 0x00, 0x00};
+    
+    scanner_ptr->simulate_gatt_notification(payload);
     
     adapter.stop();
 
     REQUIRE(received_shot.has_value());
-    CHECK(received_shot->ball_speed_mps == Catch::Approx(10.0F));
+    CHECK(received_shot->ball_speed_mps == Catch::Approx(2.5F)); // 2500 mm/s = 2.5 m/s
+    CHECK(received_shot->launch_direction_deg == Catch::Approx(-1.5F)); // -15 tenths
     CHECK(received_shot->is_putt == true);
+    CHECK(received_shot->launch_angle_deg == Catch::Approx(0.0F)); // Putts are mostly flat
 }
 
 #include <arpa/inet.h>
