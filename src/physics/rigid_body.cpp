@@ -11,12 +11,14 @@ RigidBodyDefinition::RigidBodyDefinition(
     Collider collider,
     Position position,
     LinearVelocity velocity,
+    AngularVelocity angular_velocity,
     Mass mass,
     float restitution)
     : motion_{motion},
       collider_{std::move(collider)},
       position_{position},
       velocity_{velocity},
+      angular_velocity_{angular_velocity},
       mass_{mass},
       restitution_{restitution} {}
 
@@ -24,6 +26,7 @@ MotionType RigidBodyDefinition::motion() const noexcept { return motion_; }
 const Collider& RigidBodyDefinition::collider() const noexcept { return collider_; }
 const Position& RigidBodyDefinition::position() const noexcept { return position_; }
 const LinearVelocity& RigidBodyDefinition::velocity() const noexcept { return velocity_; }
+const AngularVelocity& RigidBodyDefinition::angular_velocity() const noexcept { return angular_velocity_; }
 const Mass& RigidBodyDefinition::mass() const noexcept { return mass_; }
 float RigidBodyDefinition::restitution() const noexcept { return restitution_; }
 
@@ -44,6 +47,11 @@ RigidBodyBuilder& RigidBodyBuilder::velocity(LinearVelocity value) noexcept {
     return *this;
 }
 
+RigidBodyBuilder& RigidBodyBuilder::angular_velocity(AngularVelocity value) noexcept {
+    angular_velocity_ = value;
+    return *this;
+}
+
 RigidBodyBuilder& RigidBodyBuilder::mass(Mass value) noexcept {
     mass_ = value;
     return *this;
@@ -59,7 +67,7 @@ RigidBodyBuilder& RigidBodyBuilder::restitution(float value) {
 
 RigidBodyDefinition RigidBodyBuilder::build() const {
     return RigidBodyDefinition{
-        motion_, collider_, position_, velocity_, mass_, restitution_};
+        motion_, collider_, position_, velocity_, angular_velocity_, mass_, restitution_};
 }
 
 RigidBody::RigidBody(BodyId id, RigidBodyDefinition definition)
@@ -68,6 +76,7 @@ RigidBody::RigidBody(BodyId id, RigidBodyDefinition definition)
       collider_{definition.collider()},
       position_{definition.position()},
       velocity_{definition.velocity()},
+      angular_velocity_{definition.angular_velocity()},
       mass_{definition.mass()},
       restitution_{definition.restitution()} {}
 
@@ -76,6 +85,7 @@ MotionType RigidBody::motion() const noexcept { return motion_; }
 const Collider& RigidBody::collider() const noexcept { return collider_; }
 const Position& RigidBody::position() const noexcept { return position_; }
 const LinearVelocity& RigidBody::linear_velocity() const noexcept { return velocity_; }
+const AngularVelocity& RigidBody::angular_velocity() const noexcept { return angular_velocity_; }
 const Mass& RigidBody::mass() const noexcept { return mass_; }
 
 float RigidBody::inverse_mass() const noexcept {

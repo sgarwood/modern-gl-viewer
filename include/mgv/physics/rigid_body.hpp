@@ -25,6 +25,7 @@ public:
     [[nodiscard]] const Collider& collider() const noexcept;
     [[nodiscard]] const Position& position() const noexcept;
     [[nodiscard]] const LinearVelocity& velocity() const noexcept;
+    [[nodiscard]] const AngularVelocity& angular_velocity() const noexcept;
     [[nodiscard]] const Mass& mass() const noexcept;
     [[nodiscard]] float restitution() const noexcept;
 
@@ -36,6 +37,7 @@ private:
         Collider collider,
         Position position,
         LinearVelocity velocity,
+        AngularVelocity angular_velocity,
         Mass mass,
         float restitution);
 
@@ -43,6 +45,7 @@ private:
     Collider collider_;
     Position position_;
     LinearVelocity velocity_;
+    AngularVelocity angular_velocity_;
     Mass mass_;
     float restitution_{};
 };
@@ -54,6 +57,7 @@ public:
     RigidBodyBuilder& motion(MotionType value) noexcept;
     RigidBodyBuilder& at(Position value) noexcept;
     RigidBodyBuilder& velocity(LinearVelocity value) noexcept;
+    RigidBodyBuilder& angular_velocity(AngularVelocity value) noexcept;
     RigidBodyBuilder& mass(Mass value) noexcept;
     RigidBodyBuilder& restitution(float value);
 
@@ -64,6 +68,7 @@ private:
     MotionType motion_{MotionType::dynamic};
     Position position_;
     LinearVelocity velocity_;
+    AngularVelocity angular_velocity_;
     Mass mass_{1.0F};
     float restitution_{};
 };
@@ -77,6 +82,7 @@ public:
     [[nodiscard]] const Collider& collider() const noexcept;
     [[nodiscard]] const Position& position() const noexcept;
     [[nodiscard]] const LinearVelocity& linear_velocity() const noexcept;
+    [[nodiscard]] const AngularVelocity& angular_velocity() const noexcept;
     [[nodiscard]] const Mass& mass() const noexcept;
     [[nodiscard]] float inverse_mass() const noexcept;
     [[nodiscard]] float restitution() const noexcept;
@@ -89,6 +95,7 @@ private:
     Collider collider_;
     Position position_;
     LinearVelocity velocity_;
+    AngularVelocity angular_velocity_;
     Mass mass_;
     float restitution_{};
 };

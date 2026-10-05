@@ -70,6 +70,16 @@ private:
     Vec3 metres_per_second_squared_{};
 };
 
+class AngularVelocity final {
+public:
+    AngularVelocity() = default;
+    explicit AngularVelocity(Vec3 radians_per_second);
+    [[nodiscard]] const Vec3& radians_per_second() const noexcept;
+
+private:
+    Vec3 radians_per_second_{};
+};
+
 class Impulse final {
 public:
     explicit Impulse(Vec3 newton_seconds);

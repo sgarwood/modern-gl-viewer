@@ -77,6 +77,15 @@ const Vec3& Acceleration::metres_per_second_squared() const noexcept {
     return metres_per_second_squared_;
 }
 
+AngularVelocity::AngularVelocity(Vec3 radians_per_second)
+    : radians_per_second_{radians_per_second} {
+    require_finite(radians_per_second_, "Angular velocity must be finite");
+}
+
+const Vec3& AngularVelocity::radians_per_second() const noexcept {
+    return radians_per_second_;
+}
+
 Impulse::Impulse(Vec3 newton_seconds) : newton_seconds_{newton_seconds} {
     require_finite(newton_seconds_, "Impulse must be finite");
 }

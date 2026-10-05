@@ -36,6 +36,22 @@ FetchContent_Declare(stb
 )
 FetchContent_MakeAvailable(stb)
 
+# Ozz remains an implementation detail of mgv::animation. Runtime applications
+# do not need its import tools, samples, or test dependencies.
+set(ozz_build_tools OFF CACHE BOOL "" FORCE)
+set(ozz_build_fbx OFF CACHE BOOL "" FORCE)
+set(ozz_build_gltf OFF CACHE BOOL "" FORCE)
+set(ozz_build_data OFF CACHE BOOL "" FORCE)
+set(ozz_build_samples OFF CACHE BOOL "" FORCE)
+set(ozz_build_howtos OFF CACHE BOOL "" FORCE)
+set(ozz_build_tests OFF CACHE BOOL "" FORCE)
+set(ozz_build_postfix OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(ozz
+    GIT_REPOSITORY https://github.com/guillaumeblanc/ozz-animation.git
+    GIT_TAG 6cbdc790123aa4731d82e255df187b3a8a808256 # 0.16.0
+)
+FetchContent_MakeAvailable(ozz)
+
 add_library(mgv_core
     src/bounds.cpp
     src/camera.cpp
@@ -94,6 +110,35 @@ if(WIN32)
     target_link_libraries(mgv_network PRIVATE ws2_32)
 endif()
 
+add_library(mgv_hardware
+    src/hardware/mlm2_pro_adapter.cpp
+    src/hardware/vertex_adapter.cpp
+)
+add_library(mgv::hardware ALIAS mgv_hardware)
+target_compile_features(mgv_hardware PUBLIC cxx_std_20)
+target_include_directories(mgv_hardware PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include>"
+)
+target_link_libraries(mgv_hardware
+    PUBLIC mgv::core
+    PRIVATE mgv::project_warnings mgv::network
+)
+
+add_library(mgv_animation
+    src/animation/animation_system.cpp
+)
+add_library(mgv::animation ALIAS mgv_animation)
+target_compile_features(mgv_animation PUBLIC cxx_std_20)
+target_include_directories(mgv_animation PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include>"
+)
+target_link_libraries(mgv_animation
+    PUBLIC mgv::core
+    PRIVATE mgv::project_warnings ozz_animation
+)
+
 add_library(mgv_runtime
     src/engine.cpp
 )
@@ -104,7 +149,7 @@ target_include_directories(mgv_runtime PUBLIC
     "$<INSTALL_INTERFACE:include>"
 )
 target_link_libraries(mgv_runtime
-    PUBLIC mgv::core mgv::network mgv::physics
+    PUBLIC mgv::animation mgv::core mgv::network mgv::physics mgv::hardware
     PRIVATE mgv::project_warnings
 )
 
@@ -266,6 +311,7 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(Catch2)
 
     add_executable(mgv_tests
+        tests/animation/animation_system_test.cpp
         tests/bounds_test.cpp
         tests/camera_test.cpp
         tests/camera_controller_test.cpp
@@ -275,10 +321,12 @@ if(BUILD_TESTING)
         tests/network/datagram_test.cpp
         tests/network/network_service_test.cpp
         tests/network/udp_transport_test.cpp
+        tests/hardware/launch_monitor_test.cpp
         tests/physics/collider_test.cpp
         tests/physics/collision_detector_test.cpp
         tests/physics/physics_world_test.cpp
         tests/physics/units_test.cpp
+        tests/physics/aerodynamics_test.cpp
         tests/renderer_test.cpp
         tests/runtime_paths_test.cpp
         tests/scene_test.cpp
@@ -290,6 +338,7 @@ if(BUILD_TESTING)
     target_link_libraries(mgv_tests PRIVATE
         mgv::runtime
         mgv::project_warnings
+        ozz_animation_offline
         Catch2::Catch2WithMain
     )
     target_compile_definitions(mgv_tests PRIVATE
