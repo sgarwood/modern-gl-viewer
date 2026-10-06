@@ -22,6 +22,13 @@ Collider Collider::box(Dimensions half_extents) {
     return Collider{BoxCollider{half_extents}};
 }
 
+Collider Collider::heightmap(int width, int depth, float scale_x, float scale_z, std::vector<float> heights) {
+    if (width <= 1 || depth <= 1 || scale_x <= 0.0F || scale_z <= 0.0F || heights.size() != static_cast<size_t>(width * depth)) {
+        throw std::invalid_argument{"Invalid heightmap dimensions"};
+    }
+    return Collider{HeightmapCollider{width, depth, scale_x, scale_z, std::move(heights)}};
+}
+
 const ColliderShape& Collider::shape() const noexcept { return shape_; }
 
 } // namespace mgv::physics

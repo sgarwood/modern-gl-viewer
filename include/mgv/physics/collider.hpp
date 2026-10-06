@@ -3,6 +3,7 @@
 #include "mgv/physics/units.hpp"
 
 #include <variant>
+#include <vector>
 
 namespace mgv::physics {
 
