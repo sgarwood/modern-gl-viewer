@@ -38,6 +38,7 @@ public:
 
     void set_wind(LinearVelocity wind);
     void apply_impulse(BodyId id, Impulse impulse);
+    void set_velocity(BodyId id, LinearVelocity linear, AngularVelocity angular);
     void simulate(Duration elapsed_time);
 
 private:

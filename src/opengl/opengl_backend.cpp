@@ -553,3 +553,31 @@ std::unique_ptr<RenderBackend> make_opengl_backend(GlProcLoader load) {
 }
 
 } // namespace mgv
+
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "../stb_image_write.h"
+#include <string>
+#include <iostream>
+
+namespace mgv {
+void save_framebuffer_to_png(int width, int height, const std::string& filepath) {
+    unsigned char* pixels = new unsigned char[width * height * 3];
+    // GL_RGB = 0x1907, GL_UNSIGNED_BYTE = 0x1401
+    glReadPixels(0, 0, width, height, 0x1907, 0x1401, pixels);
+    
+    unsigned char* flipped = new unsigned char[width * height * 3];
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            for (int c = 0; c < 3; ++c) {
+                flipped[((height - 1 - y) * width + x) * 3 + c] = pixels[(y * width + x) * 3 + c];
+            }
+        }
+    }
+    
+    stbi_write_png(filepath.c_str(), width, height, 3, flipped, width * 3);
+    delete[] pixels;
+    delete[] flipped;
+    std::cout << "Saved screenshot to " << filepath << std::endl;
+}
+}

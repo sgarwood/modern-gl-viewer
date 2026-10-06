@@ -48,6 +48,13 @@ struct SetEntityTransformCommand final {
     Transform transform;
 };
 
+
+struct SetEntityVelocityCommand final {
+    EntityId entity;
+    physics::LinearVelocity linear;
+    physics::AngularVelocity angular;
+};
+
 struct ApplyEntityImpulseCommand final {
     EntityId entity;
     physics::Impulse impulse;
@@ -79,6 +86,7 @@ using EngineCommand = std::variant<
     CameraInputCommand,
     SetEntityTransformCommand,
     ApplyEntityImpulseCommand,
+    SetEntityVelocityCommand,
     PlayAnimationCommand,
     PauseAnimationCommand,
     StopAnimationCommand,

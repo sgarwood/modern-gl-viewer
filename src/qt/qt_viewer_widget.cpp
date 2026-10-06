@@ -117,6 +117,9 @@ void QtViewerWidget::keyPressEvent(QKeyEvent* event) {
     case Qt::Key_R:
         handle_input(mgv::InputAction::reset_view);
         break;
+    case Qt::Key_Space:
+        handle_input(mgv::InputAction::fire_test_shot);
+        break;
     default:
         QOpenGLWidget::keyPressEvent(event);
         return;

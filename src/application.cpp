@@ -91,6 +91,9 @@ struct Application::Impl final {
             case GLFW_KEY_DOWN:
                 application.engine->enqueue(InputAction::orbit_down);
                 break;
+            case GLFW_KEY_SPACE:
+                application.engine->enqueue(InputAction::fire_test_shot);
+                break;
             case GLFW_KEY_EQUAL:
             case GLFW_KEY_KP_ADD:
                 application.engine->enqueue(InputAction::zoom_in);
@@ -134,7 +137,19 @@ int Application::run() {
             .framebuffer_width = std::max(width, 1),
             .framebuffer_height = std::max(height, 1),
         });
+        
+        static int frame_count = 0;
+        if (frame_count == 1) {
+            impl_->engine->enqueue(InputAction::fire_test_shot);
+        }
+        
         glfwSwapBuffers(impl_->window.get());
+        if (++frame_count == 60) {
+            extern void save_framebuffer_to_png(int, int, const std::string&);
+            save_framebuffer_to_png(width, height, "/home/sgarwood/.gemini/antigravity-cli/brain/66790bf0-eae1-40b0-8b7f-3241d4cd3b8a/aerodynamics_render.png");
+            break;
+        }
+
     }
     return 0;
 }

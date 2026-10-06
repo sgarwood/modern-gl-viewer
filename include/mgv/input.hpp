@@ -10,6 +10,7 @@ enum class InputAction {
     zoom_in,
     zoom_out,
     reset_view,
+    fire_test_shot,
 };
 
 class InputSink {

@@ -75,6 +75,16 @@ public:
         return *found;
     }
 
+    
+    void set_velocity(BodyId id, LinearVelocity linear, AngularVelocity angular) {
+        auto& body = find_mutable(id);
+        if (body.motion_ == MotionType::static_body) {
+            return;
+        }
+        body.velocity_ = linear;
+        body.angular_velocity_ = angular;
+    }
+
     void apply_impulse(BodyId id, Impulse impulse) {
         auto& body = find_mutable(id);
         if (body.motion_ == MotionType::static_body) {
@@ -308,6 +318,11 @@ const RigidBody& PhysicsWorld::body(BodyId id) const {
 
 std::span<const Collision> PhysicsWorld::collisions() const noexcept {
     return impl_->collisions;
+}
+
+
+void PhysicsWorld::set_velocity(BodyId id, LinearVelocity linear, AngularVelocity angular) {
+    impl_->set_velocity(id, linear, angular);
 }
 
 void PhysicsWorld::apply_impulse(BodyId id, Impulse impulse) {

@@ -91,4 +91,5 @@ void QtViewerWindow::create_actions() {
     add_control("Zoom &in", mgv::InputAction::zoom_in);
     add_control("Zoom &out", mgv::InputAction::zoom_out);
     add_control("&Reset view", mgv::InputAction::reset_view);
+    add_control("Fire &Test Shot", mgv::InputAction::fire_test_shot);
 }
