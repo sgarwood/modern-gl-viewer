@@ -26,6 +26,8 @@ types.
 - Opaque front-to-back and translucent back-to-front submission with per-frame render statistics.
 - Optional `mgv::physics` domain with strong SI units, fixed timesteps, gravity, and rigid bodies.
 - Injectable sphere/AABB collision detection with penetration correction and restitution impulses.
+- Replaceable golf `ShotModel` for validated full-swing and putting measurements, with queued
+  launch-monitor-to-ball execution on the engine thread.
 - Optional `mgv::network` domain with a RAII `std::jthread` service and real IPv4 UDP transport.
 - Dependency-inverted network I/O, bounded message queues, backpressure, and failure events.
 - Pimpl `Engine` runtime with stable `EntityId`/`RenderableId` handles and queued typed commands.
@@ -53,6 +55,9 @@ Runtime orchestration, stable handles, tick ordering, and frontend boundaries ar
 
 Animation archive loading, playback, transform ownership, and the current root-motion boundary are
 documented in [`docs/animation.md`](docs/animation.md).
+
+Golf-shot coordinates, launch-monitor threading, model policy, and the current gameplay boundary are
+documented in [`docs/golf.md`](docs/golf.md).
 
 Cross-platform CircleCI builds and the manually triggered Debian/MSI prerelease process are
 documented in [`docs/releasing.md`](docs/releasing.md).
@@ -97,7 +102,7 @@ ctest --preset wsl-qt
 QT_QPA_PLATFORM=wayland ./build/wsl-qt/mgv_qt
 ```
 
-The included cube and default shaders load when no arguments are supplied. A model and custom
+The included ball and default shaders load when no arguments are supplied. A model and custom
 shaders can also be selected from the File menu or passed on the command line:
 
 ```sh
@@ -112,10 +117,11 @@ If WSLg's accelerated Mesa path is unavailable, software rendering is a useful d
 QT_QPA_PLATFORM=wayland LIBGL_ALWAYS_SOFTWARE=1 ./build/wsl-qt/mgv_qt
 ```
 
-Use the arrow keys to orbit, `+`/`-` to zoom, and `Home` or `R` to reset the camera. The Qt
-Controls menu exposes the same commands as clickable test controls. GLFW uses the same keys.
+Use the arrow keys to orbit, `+`/`-` to zoom, `Home` or `R` to reset the camera, and Space to fire
+the deterministic test shot. The Qt Controls menu exposes the same commands as clickable test
+controls. GLFW uses the same keys.
 
-The bundled cube and default shader exercise material texture binding with a generated checkerboard.
+The bundled ball and default shader exercise material texture binding with a generated checkerboard.
 Custom GLSL can declare `uniform sampler2D uBaseColorTexture` and
 `uniform vec4 uBaseColorFactor`; shaders that omit either binding remain valid.
 
@@ -182,14 +188,15 @@ Scene -> Renderable -> Transform / MeshData / MaterialInstance --------> Rendere
 Engine -> PhysicsWorld -> RigidBody / CollisionDetector
           |-> BodyId bound to EntityId/RenderableId -> Renderer transform update
 Engine -> AnimationSystem -> AnimationPlayerId -> EntityId/RenderableId transform update
+LaunchMonitor -> queued Shot -> ShotModel -> active physics ball -> Renderer transform update
 NetworkService -> NetworkEventSource -> NetworkEventDecoder -> queued EngineCommand
 ```
 
-The CMake targets mirror these boundaries: `mgv::core`, `mgv::animation`, `mgv::physics`,
+The CMake targets mirror these boundaries: `mgv::core`, `mgv::animation`, `mgv::golf`, `mgv::physics`,
 `mgv::network`, `mgv::runtime`, `mgv::opengl`, `mgv::qt_frontend`, and the optional QML/Qt/GLFW
 entrypoints. Ozz is private to `mgv::animation`; public engine and frontend headers expose no Ozz
 types. A future Vulkan or Direct3D adapter can replace `mgv::opengl` without changing OBJ, camera,
-animation, shader-file, networking, or scene orchestration code.
+animation, golf-shot, shader-file, networking, or scene orchestration code.
 
 `Scene` objects use shared immutable meshes, material pipelines, and textures. A `MaterialInstance`
 contains per-material named bindings without duplicating pipeline state. When a scene is submitted,
