@@ -1,3 +1,5 @@
+#include <vector>
+extern std::vector<float> g_ball_trail;
 #include "mgv/opengl_backend.hpp"
 
 #include <glad/gl.h>
@@ -515,6 +517,17 @@ public:
                 glUniform1i(location, static_cast<GLint>(index));
             }
         }
+        
+        
+        auto loc_count = glGetUniformLocation(pipeline.program(), "uTrailCount");
+        if (loc_count >= 0) {
+            glUniform1i(loc_count, g_ball_trail.size() / 3);
+        }
+        auto loc_points = glGetUniformLocation(pipeline.program(), "uTrailPositions");
+        if (loc_points >= 0 && !g_ball_trail.empty()) {
+            glUniform3fv(loc_points, g_ball_trail.size() / 3, g_ball_trail.data());
+        }
+
         glBindVertexArray(gl_mesh.vertex_array());
         glDrawElements(
             primitive_topology(pipeline.topology()),

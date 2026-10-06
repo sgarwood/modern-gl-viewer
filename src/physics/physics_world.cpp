@@ -309,6 +309,14 @@ public:
             // Rolling resistance modifier
             float rolling_res = std::max(first.material().rolling_resistance, second.material().rolling_resistance);
             float sand_mod = std::max(first.material().sand_topdressing, second.material().sand_topdressing);
+            
+            // Dynamic Wetness System:
+            // 1. Skidding/Sliding: Water acts as a lubricant (reduces dynamic friction)
+            mu = mu * (1.0f - (wetness_ * 0.4f)); 
+            
+            // 2. Rolling: Water creates viscous drag (increases rolling resistance)
+            rolling_res = rolling_res * (1.0f + (wetness_ * 0.6f));
+            
             mu += rolling_res + (sand_mod * 0.2F);
             
             // Bumpiness (Bobbles) adds micro-deflections to the tangent
@@ -363,6 +371,7 @@ public:
     std::vector<Collision> collisions;
     LinearVelocity wind_{};
     float air_density_{1.225F};
+    float wetness_{0.0f};
     double accumulated_time{};
     std::uint64_t next_id{1};
 };
@@ -385,6 +394,11 @@ PhysicsWorld::~PhysicsWorld() = default;
 PhysicsWorld::PhysicsWorld(PhysicsWorld&&) noexcept = default;
 PhysicsWorld& PhysicsWorld::operator=(PhysicsWorld&&) noexcept = default;
 
+
+
+void PhysicsWorld::set_wetness(float wetness) {
+    impl_->wetness_ = wetness;
+}
 
 void PhysicsWorld::set_air_density(float rho) {
     impl_->air_density_ = rho;

@@ -47,6 +47,7 @@ public:
 
     void set_wind(LinearVelocity wind);
     void set_air_density(float rho);
+    void set_wetness(float wetness);
     [[nodiscard]] std::optional<RaycastHit> raycast(Position origin, Vec3 direction) const;
     void apply_impulse(BodyId id, Impulse impulse);
     void set_velocity(BodyId id, LinearVelocity linear, AngularVelocity angular);

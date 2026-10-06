@@ -1,3 +1,5 @@
+#include <vector>
+std::vector<float> g_ball_trail;
 #include <cmath>
 #include <iostream>
 #include <mutex>
@@ -16,6 +18,11 @@
 #include <utility>
 
 namespace mgv {
+
+// Global trail points for shader hack
+#include <vector>
+std::vector<float> g_ball_trail;
+
 
 namespace {
     Vec3 subtract(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -112,6 +119,7 @@ struct Engine::Impl final {
         detach_launch_monitor();
         active_ball.reset();
         physics_world = physics::PhysicsWorld{physics_configuration};
+        
         animation_system.clear_players();
         commands.clear();
         entities.clear();
@@ -235,7 +243,11 @@ struct Engine::Impl final {
                     float vz = -value.wind_speed_mps * std::cos(rad);
                     physics_world.set_wind(physics::LinearVelocity{Vec3{vx, 0.0f, vz}});
                     
-                    std::cout << "Engine applied live weather: Rho=" << rho << " kg/m^3, Wind=(" << vx << ", 0, " << vz << ")" << std::endl;
+                    // Simple mock for wetness based on temperature and wind just to show dynamic behavior
+                    float wetness = (value.temperature_c < 15.0f) ? 0.8f : 0.0f; 
+                    physics_world.set_wetness(wetness);
+                    
+                    std::cout << "Engine applied live weather: Rho=" << rho << " kg/m^3, Wind=(" << vx << ", 0, " << vz << "), Wetness=" << wetness << std::endl;
                 } else if constexpr (std::is_same_v<Command, ApplyEntityImpulseCommand>) {
                     const auto& entity = find(value.entity);
                     if (!entity.body) {
@@ -504,6 +516,25 @@ void Engine::tick(Viewport viewport) {
     impl_->synchronize_animation();
     impl_->physics_world.simulate(physics::Duration{elapsed});
     impl_->synchronize_physics();
+
+    // Store trail
+    for (auto& entity : impl_->entities) {
+        if (entity.body) {
+            auto& rb = impl_->physics_world.body(*entity.body);
+            if (rb.motion() == physics::MotionType::dynamic) {
+                auto p = rb.position().metres();
+                if (g_ball_trail.empty() || std::abs(g_ball_trail[g_ball_trail.size()-3] - p.x) > 0.05f || std::abs(g_ball_trail[g_ball_trail.size()-1] - p.z) > 0.05f) {
+                    g_ball_trail.push_back(p.x);
+                    g_ball_trail.push_back(p.y);
+                    g_ball_trail.push_back(p.z);
+                    if (g_ball_trail.size() > 32 * 3) {
+                        g_ball_trail.erase(g_ball_trail.begin(), g_ball_trail.begin() + 3);
+                    }
+                }
+            }
+        }
+    }
+
 
     if (impl_->is_range_finder_active_) {
         impl_->sway_time_ += elapsed;

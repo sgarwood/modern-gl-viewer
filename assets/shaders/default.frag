@@ -7,6 +7,9 @@ uniform sampler2D uBaseColorTexture;
 uniform vec4 uBaseColorFactor;
 
 out vec4 fragColor;
+uniform int uTrailCount;
+uniform vec3 uTrailPositions[32];
+
 
 void main() {
     vec3 normal = normalize(vNormal);
@@ -24,8 +27,27 @@ void main() {
     }
     
     // Base Grass Color (lush green)
-    vec3 grassColor1 = vec3(0.18, 0.45, 0.15);
-    vec3 grassColor2 = vec3(0.22, 0.52, 0.18);
+    // Wetness and Trail
+    
+    // Dynamic wetness factor
+    float wetness = 0.8; // Pretend it's very wet for this slice
+    
+    // Check if we are near a trail point
+    float dry_factor = 0.0;
+    for (int i = 0; i < uTrailCount; ++i) {
+        float dist = distance(vPosition, uTrailPositions[i]);
+        if (dist < 0.15) { // 15cm trail width
+            dry_factor = max(dry_factor, 1.0 - (dist / 0.15));
+        }
+    }
+    
+    // Base grass color
+    vec3 grassColor1 = mix(vec3(0.18, 0.45, 0.15), vec3(0.10, 0.35, 0.10), wetness);
+    vec3 grassColor2 = mix(vec3(0.22, 0.52, 0.18), vec3(0.12, 0.40, 0.12), wetness);
+    
+    // Dry trail reverts to original lighter color
+    grassColor1 = mix(grassColor1, vec3(0.18, 0.45, 0.15), dry_factor);
+    grassColor2 = mix(grassColor2, vec3(0.22, 0.52, 0.18), dry_factor);
     
     // Procedural mower pattern
     float pattern = mod(floor(vPosition.x * 1.5) + floor(vPosition.z * 1.5), 2.0);
