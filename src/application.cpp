@@ -76,7 +76,13 @@ struct Application::Impl final {
         engine = std::make_unique<Engine>(make_opengl_backend([](const char* name) {
             return glfwGetProcAddress(name);
         }));
-        engine->load(config.assets);
+        // Add a ground plane body for the raycaster and physics
+        auto entities = engine->load(config.assets);
+        if (!entities.empty()) {
+            engine->bind_physics(entities[0], physics::RigidBodyBuilder{
+                physics::Collider::box(physics::Dimensions{{1000.0f, 0.5f, 1000.0f}})
+            }.motion(physics::MotionType::static_body).at(physics::Position{{0.0f, -0.5f, 0.0f}}).build());
+        }
 
         environment = std::make_unique<network::EnvironmentSystem>(
             std::make_unique<network::HttpBackendClient>("")
@@ -161,6 +167,12 @@ int Application::run() {
         });
         
         static int frame_count = 0;
+        if (frame_count == 10) {
+            impl_->engine->enqueue(InputAction::toggle_range_finder);
+        }
+        if (frame_count == 30) {
+            impl_->engine->enqueue(InputAction::range_finder_ping);
+        }
         if (frame_count == 1) {
             impl_->engine->enqueue(InputAction::fire_test_shot);
         }

@@ -16,6 +16,21 @@
 #include <utility>
 
 namespace mgv {
+
+namespace {
+    Vec3 subtract(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+    Vec3 add(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+    Vec3 scaled(const Vec3& a, float s) { return {a.x * s, a.y * s, a.z * s}; }
+    Vec3 cross(const Vec3& a, const Vec3& b) {
+        return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+    }
+    Vec3 normalize(const Vec3& a) {
+        float len = std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+        if (len < 1e-6f) return {0,0,0};
+        return {a.x / len, a.y / len, a.z / len};
+    }
+}
+
 namespace {
 
 class SteadyClock final : public Clock {
@@ -129,7 +144,32 @@ struct Engine::Impl final {
             [this](auto&& value) {
                 using Command = std::remove_cvref_t<decltype(value)>;
                 if constexpr (std::is_same_v<Command, CameraInputCommand>) {
-                    camera_input->handle(value.action);
+                    if (value.action == InputAction::toggle_range_finder) {
+                        is_range_finder_active_ = !is_range_finder_active_;
+                        auto cam = renderer.camera();
+                        if (is_range_finder_active_) {
+                            cam.look_at(Vec3{0.0f, 1.5f, 5.0f}, Vec3{0.0f, 0.0f, -10.0f});
+                            range_finder_base_target_ = Vec3{0.0f, 0.0f, -10.0f};
+                            std::cout << "[UI] RANGE FINDER DEPLOYED. Press F to Ping Distance." << std::endl;
+                        } else {
+                            cam.look_at(Vec3{-8.0f, 6.0f, -8.0f}, Vec3{0.0f, 0.0f, 0.0f});
+                            std::cout << "[UI] RANGE FINDER STOWED." << std::endl;
+                        }
+                        renderer.set_camera(cam);
+                    } else if (value.action == InputAction::range_finder_ping) {
+                        if (is_range_finder_active_) {
+                            auto cam = renderer.camera();
+                            Vec3 dir = normalize(subtract(cam.target(), cam.position()));
+                            auto hit = physics_world.raycast(physics::Position{cam.position()}, dir);
+                            if (hit) {
+                                std::cout << "[UI] PING! Target Acquired at: " << hit->distance << " meters." << std::endl;
+                            } else {
+                                std::cout << "[UI] PING! No Target In Sight." << std::endl;
+                            }
+                        }
+                    } else {
+                        camera_input->handle(value.action);
+                    }
                 } else if constexpr (std::is_same_v<Command, SetEntityTransformCommand>) {
                     auto& entity = find(value.entity);
                     entity.transform = std::move(value.transform);
@@ -215,6 +255,11 @@ void drain_commands() {
     std::unique_ptr<NetworkEventDecoder> network_decoder;
     Clock::time_point started_at;
     Clock::time_point previous_tick;
+
+    bool is_range_finder_active_{false};
+    float sway_time_{0.0f};
+    Vec3 range_finder_base_target_{};
+
 };
 
 Engine::Engine(std::unique_ptr<RenderBackend> backend)
@@ -334,6 +379,24 @@ void Engine::tick(Viewport viewport) {
     impl_->synchronize_animation();
     impl_->physics_world.simulate(physics::Duration{elapsed});
     impl_->synchronize_physics();
+
+    if (impl_->is_range_finder_active_) {
+        impl_->sway_time_ += elapsed;
+        auto cam = impl_->renderer.camera();
+        
+        Vec3 forward = normalize(subtract(impl_->range_finder_base_target_, cam.position()));
+        Vec3 right = normalize(cross(forward, Vec3{0,1,0}));
+        Vec3 up = normalize(cross(right, forward));
+        
+        // Procedural Sniper Sway (Perlin approximation)
+        float yaw_sway = std::sin(impl_->sway_time_ * 1.5f) * 0.1f + std::cos(impl_->sway_time_ * 0.8f) * 0.05f;
+        float pitch_sway = std::cos(impl_->sway_time_ * 1.2f) * 0.08f + std::sin(impl_->sway_time_ * 0.5f) * 0.04f;
+        
+        Vec3 swayed_target = add(impl_->range_finder_base_target_, add(scaled(right, yaw_sway), scaled(up, pitch_sway)));
+        cam.look_at(cam.position(), swayed_target);
+        impl_->renderer.set_camera(cam);
+    }
+
 
     const auto total_elapsed = std::chrono::duration<float>{now - impl_->started_at}.count();
     impl_->renderer.render({

@@ -14,7 +14,16 @@ struct PhysicsConfiguration final {
     std::size_t maximum_substeps{8};
 };
 
+
+struct RaycastHit final {
+    BodyId body;
+    Position position;
+    Vec3 normal;
+    float distance;
+};
+
 class PhysicsWorldImpl;
+
 
 class PhysicsWorld final {
 public:
@@ -38,6 +47,7 @@ public:
 
     void set_wind(LinearVelocity wind);
     void set_air_density(float rho);
+    [[nodiscard]] std::optional<RaycastHit> raycast(Position origin, Vec3 direction) const;
     void apply_impulse(BodyId id, Impulse impulse);
     void set_velocity(BodyId id, LinearVelocity linear, AngularVelocity angular);
     void simulate(Duration elapsed_time);

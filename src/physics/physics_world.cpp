@@ -85,6 +85,105 @@ public:
         body.angular_velocity_ = angular;
     }
 
+    
+    [[nodiscard]] std::optional<RaycastHit> raycast(Position origin, Vec3 direction) const {
+        std::optional<RaycastHit> closest_hit;
+        for (const auto& body : bodies) {
+            auto hit = raycast_body(body, origin, direction);
+            if (hit) {
+                if (!closest_hit || hit->distance < closest_hit->distance) {
+                    closest_hit = hit;
+                }
+            }
+        }
+        return closest_hit;
+    }
+
+    [[nodiscard]] std::optional<RaycastHit> raycast_body(const RigidBody& body, Position origin, Vec3 direction) const {
+        auto normalize_v = [](Vec3 v) {
+            float len = std::sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
+            if (len < 1e-6f) return Vec3{0,0,0};
+            return Vec3{v.x/len, v.y/len, v.z/len};
+        };
+        auto subtract_v = [](Vec3 a, Vec3 b) { return Vec3{a.x-b.x, a.y-b.y, a.z-b.z}; };
+        auto add_v = [](Vec3 a, Vec3 b) { return Vec3{a.x+b.x, a.y+b.y, a.z+b.z}; };
+        auto scaled_v = [](Vec3 a, float s) { return Vec3{a.x*s, a.y*s, a.z*s}; };
+        auto dot_v = [](Vec3 a, Vec3 b) { return a.x*b.x + a.y*b.y + a.z*b.z; };
+
+        Vec3 o = origin.metres();
+        Vec3 d = normalize_v(direction);
+        Vec3 pos = body.position().metres();
+
+        if (std::holds_alternative<SphereCollider>(body.collider().shape())) {
+            float r = std::get<SphereCollider>(body.collider().shape()).radius.metres();
+            Vec3 oc = subtract_v(o, pos);
+            float a = dot_v(d, d);
+            float b = 2.0F * dot_v(oc, d);
+            float c = dot_v(oc, oc) - r * r;
+            float discriminant = b * b - 4 * a * c;
+            if (discriminant > 0.0F) {
+                float t1 = (-b - std::sqrt(discriminant)) / (2.0F * a);
+                if (t1 > 0.0F) {
+                    Vec3 hit_p = add_v(o, scaled_v(d, t1));
+                    Vec3 normal = normalize_v(subtract_v(hit_p, pos));
+                    return RaycastHit{body.id(), Position{hit_p}, normal, t1};
+                }
+            }
+        }
+        
+        if (std::holds_alternative<BoxCollider>(body.collider().shape())) {
+            Vec3 extents = std::get<BoxCollider>(body.collider().shape()).half_extents.metres();
+            Vec3 min = subtract_v(pos, extents);
+            Vec3 max = add_v(pos, extents);
+            
+            float t1 = (min.x - o.x) / d.x;
+            float t2 = (max.x - o.x) / d.x;
+            float t3 = (min.y - o.y) / d.y;
+            float t4 = (max.y - o.y) / d.y;
+            float t5 = (min.z - o.z) / d.z;
+            float t6 = (max.z - o.z) / d.z;
+            
+            float tmin = std::max(std::max(std::min(t1, t2), std::min(t3, t4)), std::min(t5, t6));
+            float tmax = std::min(std::min(std::max(t1, t2), std::max(t3, t4)), std::max(t5, t6));
+            
+            if (tmax >= 0.0F && tmin <= tmax) {
+                if (tmin > 0.0F) {
+                    Vec3 hit_p = add_v(o, scaled_v(d, tmin));
+                    Vec3 normal = {0, 1, 0};
+                    return RaycastHit{body.id(), Position{hit_p}, normal, tmin};
+                }
+            }
+        }
+        if (std::holds_alternative<HeightmapCollider>(body.collider().shape())) {
+            const auto& hm = std::get<HeightmapCollider>(body.collider().shape());
+            float min_h = 0.0f, max_h = 0.0f;
+            for (float h : hm.heights) {
+                if (h < min_h) min_h = h;
+                if (h > max_h) max_h = h;
+            }
+            float half_w = (hm.width * hm.scale_x) * 0.5f;
+            float half_d = (hm.depth * hm.scale_z) * 0.5f;
+            Vec3 min = subtract_v(pos, Vec3{half_w, -min_h, half_d});
+            Vec3 max = add_v(pos, Vec3{half_w, max_h, half_d});
+            
+            float t1 = (min.x - o.x) / d.x;
+            float t2 = (max.x - o.x) / d.x;
+            float t3 = (min.y - o.y) / d.y;
+            float t4 = (max.y - o.y) / d.y;
+            float t5 = (min.z - o.z) / d.z;
+            float t6 = (max.z - o.z) / d.z;
+            
+            float tmin = std::max(std::max(std::min(t1, t2), std::min(t3, t4)), std::min(t5, t6));
+            float tmax = std::min(std::min(std::max(t1, t2), std::max(t3, t4)), std::max(t5, t6));
+            
+            if (tmax >= 0.0F && tmin <= tmax && tmin > 0.0F) {
+                Vec3 hit_p = add_v(o, scaled_v(d, tmin));
+                return RaycastHit{body.id(), Position{hit_p}, Vec3{0,1,0}, tmin};
+            }
+        }
+        return std::nullopt;
+    }
+
     void apply_impulse(BodyId id, Impulse impulse) {
         auto& body = find_mutable(id);
         if (body.motion_ == MotionType::static_body) {
@@ -329,6 +428,11 @@ std::span<const Collision> PhysicsWorld::collisions() const noexcept {
 
 void PhysicsWorld::set_velocity(BodyId id, LinearVelocity linear, AngularVelocity angular) {
     impl_->set_velocity(id, linear, angular);
+}
+
+
+std::optional<RaycastHit> PhysicsWorld::raycast(Position origin, Vec3 direction) const {
+    return impl_->raycast(origin, direction);
 }
 
 void PhysicsWorld::apply_impulse(BodyId id, Impulse impulse) {

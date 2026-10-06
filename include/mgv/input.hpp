@@ -11,6 +11,8 @@ enum class InputAction {
     zoom_out,
     reset_view,
     fire_test_shot,
+    toggle_range_finder,
+    range_finder_ping,
 };
 
 class InputSink {
