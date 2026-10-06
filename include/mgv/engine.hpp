@@ -1,6 +1,8 @@
 #pragma once
 
 #include "mgv/animation/animation_system.hpp"
+#include "mgv/golf/shot_model.hpp"
+#include "mgv/hardware/launch_monitor.hpp"
 #include "mgv/input.hpp"
 #include "mgv/network/network_service.hpp"
 #include "mgv/physics/physics_world.hpp"
@@ -67,6 +69,11 @@ struct ApplyEntityImpulseCommand final {
     physics::Impulse impulse;
 };
 
+struct LaunchBallCommand final {
+    EntityId entity;
+    golf::Shot shot;
+};
+
 struct PlayAnimationCommand final {
     animation::AnimationPlayerId player;
 };
@@ -94,6 +101,7 @@ using EngineCommand = std::variant<
     SetEntityTransformCommand,
     ApplyEntityImpulseCommand,
     SetEntityVelocityCommand,
+    LaunchBallCommand,
     SetWeatherCommand,
     PlayAnimationCommand,
     PauseAnimationCommand,
@@ -121,6 +129,11 @@ public:
         std::unique_ptr<RenderBackend> backend,
         std::unique_ptr<Clock> clock,
         physics::PhysicsConfiguration physics = {});
+    Engine(
+        std::unique_ptr<RenderBackend> backend,
+        std::unique_ptr<Clock> clock,
+        physics::PhysicsConfiguration physics,
+        std::unique_ptr<golf::ShotModel> shot_model);
     ~Engine();
 
     Engine(Engine&&) noexcept;
@@ -133,6 +146,9 @@ public:
     [[nodiscard]] physics::BodyId bind_physics(
         EntityId entity,
         physics::RigidBodyDefinition body);
+    [[nodiscard]] physics::BodyId bind_golf_ball(
+        EntityId entity,
+        physics::RigidBodyDefinition body);
     [[nodiscard]] animation::AnimationClipId load_animation(
         const animation::AnimationAssetPaths& assets);
     [[nodiscard]] animation::AnimationPlayerId bind_animation(
@@ -142,6 +158,8 @@ public:
 
     void enqueue(EngineCommand command);
     void enqueue(InputAction action);
+    void submit_shot(golf::Shot shot);
+    void attach_launch_monitor(std::unique_ptr<hardware::LaunchMonitor> monitor);
     void attach_network(
         std::unique_ptr<network::NetworkEventSource> events,
         std::unique_ptr<NetworkEventDecoder> decoder);

@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <thread>
+#include <variant>
 #include <utility>
 #include <vector>
 
@@ -101,6 +102,45 @@ public:
 private:
     mgv::EntityId entity_;
     std::thread::id& thread_;
+};
+
+class FakeShotModel final : public mgv::golf::ShotModel {
+public:
+    explicit FakeShotModel(std::thread::id& resolved_on) : resolved_on_{resolved_on} {}
+
+    [[nodiscard]] mgv::golf::BallLaunch resolve(const mgv::golf::Shot& shot) const override {
+        resolved_on_ = std::this_thread::get_id();
+        last_shot = shot;
+        return {
+            .linear_velocity = mgv::physics::LinearVelocity{{2.0F, 0.0F, 0.0F}},
+            .angular_velocity = mgv::physics::AngularVelocity{{0.0F, 3.0F, 0.0F}},
+        };
+    }
+
+    mutable std::optional<mgv::golf::Shot> last_shot;
+
+private:
+    std::thread::id& resolved_on_;
+};
+
+struct LaunchMonitorProbe final {
+    bool started{};
+    bool stopped{};
+};
+
+class FakeLaunchMonitor final : public mgv::hardware::LaunchMonitor {
+public:
+    explicit FakeLaunchMonitor(LaunchMonitorProbe& probe) : probe_{probe} {}
+
+    void set_callback(ShotCallback callback) override { callback_ = std::move(callback); }
+    void start() override { probe_.started = true; }
+    void stop() override { probe_.stopped = true; }
+
+    void emit(const mgv::golf::Shot& shot) { callback_(shot); }
+
+private:
+    LaunchMonitorProbe& probe_;
+    ShotCallback callback_;
 };
 
 [[nodiscard]] mgv::Scene triangle_scene() {
@@ -297,4 +337,99 @@ TEST_CASE("network events are decoded into commands on the engine thread") {
 
     CHECK(decoder_thread == engine_thread);
     CHECK(engine.transform(entity).position() == mgv::Vec3{7.0F, 8.0F, 9.0F});
+}
+
+TEST_CASE("launch monitor shots execute through the injected model on the engine thread") {
+    RenderProbe render_probe;
+    auto clock = std::make_unique<FakeClock>();
+    auto* clock_view = clock.get();
+    std::thread::id resolved_on;
+    auto shot_model = std::make_unique<FakeShotModel>(resolved_on);
+    auto* shot_model_view = shot_model.get();
+    LaunchMonitorProbe monitor_probe;
+    auto monitor = std::make_unique<FakeLaunchMonitor>(monitor_probe);
+    auto* monitor_view = monitor.get();
+
+    {
+        mgv::physics::PhysicsConfiguration physics;
+        physics.fixed_time_step = mgv::physics::Duration{0.1F};
+        physics.gravity = mgv::physics::Acceleration{{}};
+        mgv::Engine engine{
+            std::make_unique<FakeBackend>(render_probe),
+            std::move(clock),
+            physics,
+            std::move(shot_model)};
+        const auto ball = engine.set_scene(triangle_scene()).front();
+        static_cast<void>(engine.bind_golf_ball(
+            ball,
+            mgv::physics::RigidBodyBuilder{
+                mgv::physics::Collider::sphere(mgv::physics::Length{0.021335F})}
+                .mass(mgv::physics::Mass{0.04593F})
+                .build()));
+        engine.attach_launch_monitor(std::move(monitor));
+
+        monitor_view->emit(mgv::golf::FullSwingData{.ball_speed_mps = 42.0F});
+
+        CHECK(monitor_probe.started);
+        CHECK_FALSE(shot_model_view->last_shot.has_value());
+        CHECK(engine.transform(ball).position().x == Catch::Approx(0.0F));
+
+        clock_view->advance(std::chrono::duration<float>{0.1F});
+        const auto engine_thread = std::this_thread::get_id();
+        engine.tick({800, 600});
+
+        REQUIRE(shot_model_view->last_shot.has_value());
+        CHECK(std::get<mgv::golf::FullSwingData>(*shot_model_view->last_shot).ball_speed_mps ==
+              Catch::Approx(42.0F));
+        CHECK(resolved_on == engine_thread);
+        CHECK(engine.transform(ball).position().x == Catch::Approx(0.2F).margin(0.00001F));
+    }
+
+    CHECK(monitor_probe.stopped);
+}
+
+TEST_CASE("frontend test-shot input uses the same queued shot execution path") {
+    RenderProbe probe;
+    auto clock = std::make_unique<FakeClock>();
+    auto* clock_view = clock.get();
+    std::thread::id resolved_on;
+    auto shot_model = std::make_unique<FakeShotModel>(resolved_on);
+    auto* shot_model_view = shot_model.get();
+    mgv::physics::PhysicsConfiguration physics;
+    physics.fixed_time_step = mgv::physics::Duration{0.1F};
+    physics.gravity = mgv::physics::Acceleration{{}};
+    mgv::Engine engine{
+        std::make_unique<FakeBackend>(probe),
+        std::move(clock),
+        physics,
+        std::move(shot_model)};
+    const auto ball = engine.set_scene(triangle_scene()).front();
+    static_cast<void>(engine.bind_golf_ball(
+        ball,
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::sphere(mgv::physics::Length{0.021335F})}
+            .mass(mgv::physics::Mass{0.04593F})
+            .build()));
+
+    engine.enqueue(mgv::InputAction::fire_test_shot);
+    CHECK_FALSE(shot_model_view->last_shot.has_value());
+
+    clock_view->advance(std::chrono::duration<float>{0.1F});
+    engine.tick({800, 600});
+
+    REQUIRE(shot_model_view->last_shot.has_value());
+    CHECK(std::holds_alternative<mgv::golf::FullSwingData>(*shot_model_view->last_shot));
+    CHECK(engine.transform(ball).position().x == Catch::Approx(0.2F).margin(0.00001F));
+}
+
+TEST_CASE("engine requires a bound active ball before attaching a launch monitor") {
+    RenderProbe probe;
+    LaunchMonitorProbe monitor_probe;
+    mgv::Engine engine{
+        std::make_unique<FakeBackend>(probe), std::make_unique<FakeClock>()};
+
+    CHECK_THROWS_AS(
+        engine.attach_launch_monitor(std::make_unique<FakeLaunchMonitor>(monitor_probe)),
+        std::logic_error);
+    CHECK_FALSE(monitor_probe.started);
 }

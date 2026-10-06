@@ -341,6 +341,7 @@ if(BUILD_TESTING)
         tests/camera_test.cpp
         tests/camera_controller_test.cpp
         tests/engine_test.cpp
+        tests/golf/shot_model_test.cpp
         tests/image_loader_test.cpp
         tests/obj_loader_test.cpp
         tests/network/datagram_test.cpp
