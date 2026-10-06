@@ -104,6 +104,20 @@ target_include_directories(mgv_physics PUBLIC
 )
 target_link_libraries(mgv_physics PRIVATE mgv::project_warnings)
 
+add_library(mgv_golf
+    src/golf/shot_model.cpp
+)
+add_library(mgv::golf ALIAS mgv_golf)
+target_compile_features(mgv_golf PUBLIC cxx_std_20)
+target_include_directories(mgv_golf PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include>"
+)
+target_link_libraries(mgv_golf
+    PUBLIC mgv::physics
+    PRIVATE mgv::project_warnings
+)
+
 find_package(Threads REQUIRED)
 
 add_library(mgv_network
@@ -170,7 +184,7 @@ target_include_directories(mgv_runtime PUBLIC
     "$<INSTALL_INTERFACE:include>"
 )
 target_link_libraries(mgv_runtime
-    PUBLIC mgv::animation mgv::core mgv::network mgv::physics mgv::hardware
+    PUBLIC mgv::animation mgv::core mgv::golf mgv::network mgv::physics mgv::hardware
     PRIVATE mgv::project_warnings
 )
 

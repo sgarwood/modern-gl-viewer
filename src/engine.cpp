@@ -71,18 +71,25 @@ struct Engine::Impl final {
     Impl(
         std::unique_ptr<RenderBackend> backend,
         std::unique_ptr<Clock> clock_value,
-        physics::PhysicsConfiguration physics_value)
+        physics::PhysicsConfiguration physics_value,
+        std::unique_ptr<golf::ShotModel> shot_model_value)
         : renderer{std::move(backend)},
           clock{std::move(clock_value)},
           physics_configuration{physics_value},
-          physics_world{physics_value} {
+          physics_world{physics_value},
+          shot_model{std::move(shot_model_value)} {
         if (!clock) {
             throw std::invalid_argument{"Engine requires a clock"};
+        }
+        if (!shot_model) {
+            throw std::invalid_argument{"Engine requires a shot model"};
         }
         camera_input = make_orbit_camera_controller(renderer);
         started_at = clock->now();
         previous_tick = started_at;
     }
+
+    ~Impl() { detach_launch_monitor(); }
 
     [[nodiscard]] EntityRecord& find(EntityId id) {
         const auto found = std::ranges::find(entities, id, &EntityRecord::id);
@@ -102,6 +109,8 @@ struct Engine::Impl final {
 
     [[nodiscard]] std::vector<EntityId> replace_entities(
         const std::vector<RenderableId>& renderables) {
+        detach_launch_monitor();
+        active_ball.reset();
         physics_world = physics::PhysicsWorld{physics_configuration};
         animation_system.clear_players();
         commands.clear();
@@ -139,12 +148,53 @@ struct Engine::Impl final {
         }
     }
 
+    void enqueue(EngineCommand command) {
+        std::lock_guard<std::mutex> lock(commands_mutex);
+        commands.push_back(std::move(command));
+    }
+
+    void detach_launch_monitor() noexcept {
+        if (!launch_monitor) {
+            return;
+        }
+        try {
+            launch_monitor->stop();
+            launch_monitor->set_callback({});
+        } catch (...) {
+        }
+        launch_monitor.reset();
+    }
+
+    void launch_ball(EntityId entity_id, const golf::Shot& shot) {
+        const auto& entity = find(entity_id);
+        if (!entity.body) {
+            throw std::logic_error{"Cannot launch an entity without a physics body"};
+        }
+        const auto launch = shot_model->resolve(shot);
+        physics_world.set_velocity(
+            *entity.body,
+            launch.linear_velocity,
+            launch.angular_velocity);
+    }
+
     void execute(EngineCommand command) {
         std::visit(
             [this](auto&& value) {
                 using Command = std::remove_cvref_t<decltype(value)>;
                 if constexpr (std::is_same_v<Command, CameraInputCommand>) {
-                    if (value.action == InputAction::toggle_range_finder) {
+                    if (value.action == InputAction::fire_test_shot) {
+                        if (active_ball) {
+                            launch_ball(
+                                *active_ball,
+                                golf::FullSwingData{
+                                    .ball_speed_mps = 55.0F,
+                                    .launch_angle_deg = 15.0F,
+                                    .launch_direction_deg = 0.0F,
+                                    .total_spin_rpm = 3'000.0F,
+                                    .spin_axis_deg = 0.0F,
+                                });
+                        }
+                    } else if (value.action == InputAction::toggle_range_finder) {
                         is_range_finder_active_ = !is_range_finder_active_;
                         auto cam = renderer.camera();
                         if (is_range_finder_active_) {
@@ -192,6 +242,14 @@ struct Engine::Impl final {
                         throw std::logic_error{"Cannot apply an impulse to an unbound entity"};
                     }
                     physics_world.apply_impulse(*entity.body, value.impulse);
+                } else if constexpr (std::is_same_v<Command, SetEntityVelocityCommand>) {
+                    const auto& entity = find(value.entity);
+                    if (!entity.body) {
+                        throw std::logic_error{"Cannot set velocity on an unbound entity"};
+                    }
+                    physics_world.set_velocity(*entity.body, value.linear, value.angular);
+                } else if constexpr (std::is_same_v<Command, LaunchBallCommand>) {
+                    launch_ball(value.entity, value.shot);
                 } else if constexpr (std::is_same_v<Command, PlayAnimationCommand>) {
                     animation_system.play(value.player);
                 } else if constexpr (std::is_same_v<Command, PauseAnimationCommand>) {
@@ -246,6 +304,7 @@ void drain_commands() {
     std::unique_ptr<Clock> clock;
     physics::PhysicsConfiguration physics_configuration;
     physics::PhysicsWorld physics_world;
+    std::unique_ptr<golf::ShotModel> shot_model;
     animation::AnimationSystem animation_system;
     std::unique_ptr<InputSink> camera_input;
     std::deque<EngineCommand> commands;
@@ -259,6 +318,8 @@ void drain_commands() {
     bool is_range_finder_active_{false};
     float sway_time_{0.0f};
     Vec3 range_finder_base_target_{};
+    std::optional<EntityId> active_ball;
+    std::unique_ptr<hardware::LaunchMonitor> launch_monitor;
 
 };
 
@@ -266,16 +327,29 @@ Engine::Engine(std::unique_ptr<RenderBackend> backend)
     : Engine{
           std::move(backend),
           std::make_unique<SteadyClock>(),
-          physics::PhysicsConfiguration{}} {}
+          physics::PhysicsConfiguration{},
+          std::make_unique<golf::StandardShotModel>()} {}
 
 Engine::Engine(
     std::unique_ptr<RenderBackend> backend,
     std::unique_ptr<Clock> clock,
     physics::PhysicsConfiguration physics)
+    : Engine{
+          std::move(backend),
+          std::move(clock),
+          physics,
+          std::make_unique<golf::StandardShotModel>()} {}
+
+Engine::Engine(
+    std::unique_ptr<RenderBackend> backend,
+    std::unique_ptr<Clock> clock,
+    physics::PhysicsConfiguration physics,
+    std::unique_ptr<golf::ShotModel> shot_model)
     : impl_{std::make_unique<Impl>(
           std::move(backend),
           std::move(clock),
-          physics)} {}
+          physics,
+          std::move(shot_model))} {}
 
 Engine::~Engine() = default;
 Engine::Engine(Engine&&) noexcept = default;
@@ -306,6 +380,21 @@ physics::BodyId Engine::bind_physics(
     return id;
 }
 
+physics::BodyId Engine::bind_golf_ball(
+    EntityId entity,
+    physics::RigidBodyDefinition body) {
+    if (impl_->active_ball) {
+        throw std::logic_error{"Engine already has an active golf ball"};
+    }
+    if (body.motion() != physics::MotionType::dynamic ||
+        !std::holds_alternative<physics::SphereCollider>(body.collider().shape())) {
+        throw std::invalid_argument{"Active golf ball must be a dynamic sphere"};
+    }
+    const auto id = bind_physics(entity, std::move(body));
+    impl_->active_ball = entity;
+    return id;
+}
+
 animation::AnimationClipId Engine::load_animation(
     const animation::AnimationAssetPaths& assets) {
     return impl_->animation_system.load(assets);
@@ -333,6 +422,10 @@ void Engine::remove(EntityId entity) {
     if (found == impl_->entities.end()) {
         throw std::out_of_range{"Unknown entity identifier"};
     }
+    if (impl_->active_ball == entity) {
+        impl_->detach_launch_monitor();
+        impl_->active_ball.reset();
+    }
     if (found->body) {
         static_cast<void>(impl_->physics_world.remove_body(*found->body));
     }
@@ -344,12 +437,37 @@ void Engine::remove(EntityId entity) {
 }
 
 void Engine::enqueue(EngineCommand command) {
-    std::lock_guard<std::mutex> lock(impl_->commands_mutex);
-    impl_->commands.push_back(std::move(command));
+    impl_->enqueue(std::move(command));
 }
 
 void Engine::enqueue(InputAction action) {
     enqueue(CameraInputCommand{action});
+}
+
+void Engine::submit_shot(golf::Shot shot) {
+    if (!impl_->active_ball) {
+        throw std::logic_error{"Engine has no active golf ball"};
+    }
+    impl_->enqueue(LaunchBallCommand{*impl_->active_ball, std::move(shot)});
+}
+
+void Engine::attach_launch_monitor(std::unique_ptr<hardware::LaunchMonitor> monitor) {
+    if (!monitor) {
+        throw std::invalid_argument{"Engine requires a launch monitor"};
+    }
+    if (!impl_->active_ball) {
+        throw std::logic_error{"Bind an active golf ball before attaching a launch monitor"};
+    }
+    if (impl_->launch_monitor) {
+        throw std::logic_error{"Engine already has a launch monitor"};
+    }
+
+    const auto ball = *impl_->active_ball;
+    monitor->set_callback([implementation = impl_.get(), ball](const hardware::ShotData& shot) {
+        implementation->enqueue(LaunchBallCommand{ball, shot});
+    });
+    monitor->start();
+    impl_->launch_monitor = std::move(monitor);
 }
 
 void Engine::attach_network(

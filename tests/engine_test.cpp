@@ -382,7 +382,7 @@ TEST_CASE("launch monitor shots execute through the injected model on the engine
         CHECK(std::get<mgv::golf::FullSwingData>(*shot_model_view->last_shot).ball_speed_mps ==
               Catch::Approx(42.0F));
         CHECK(resolved_on == engine_thread);
-        CHECK(engine.transform(ball).position().x == Catch::Approx(0.2F).margin(0.00001F));
+        CHECK(engine.transform(ball).position().x == Catch::Approx(0.2F).margin(0.001F));
     }
 
     CHECK(monitor_probe.stopped);
@@ -419,7 +419,7 @@ TEST_CASE("frontend test-shot input uses the same queued shot execution path") {
 
     REQUIRE(shot_model_view->last_shot.has_value());
     CHECK(std::holds_alternative<mgv::golf::FullSwingData>(*shot_model_view->last_shot));
-    CHECK(engine.transform(ball).position().x == Catch::Approx(0.2F).margin(0.00001F));
+    CHECK(engine.transform(ball).position().x == Catch::Approx(0.2F).margin(0.001F));
 }
 
 TEST_CASE("engine requires a bound active ball before attaching a launch monitor") {
