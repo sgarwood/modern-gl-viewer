@@ -1,6 +1,11 @@
 #include "mgv/application.hpp"
 
 #include "mgv/engine.hpp"
+
+#include "mgv/network/environment_system.hpp"
+#include "mgv/network/http_backend_client.hpp"
+#include <iostream>
+
 #include "mgv/opengl_backend.hpp"
 
 #define GLFW_INCLUDE_NONE
@@ -72,6 +77,20 @@ struct Application::Impl final {
             return glfwGetProcAddress(name);
         }));
         engine->load(config.assets);
+
+        environment = std::make_unique<network::EnvironmentSystem>(
+            std::make_unique<network::HttpBackendClient>("")
+        );
+        environment->on_weather_updated([this](const network::WeatherCondition& w) {
+            std::cout << "Callback executed on background thread!" << std::endl;
+            engine->enqueue(SetWeatherCommand{
+                w.temperature_c,
+                w.wind_speed_mps,
+                w.wind_direction_deg
+            });
+        });
+        environment->start(1, std::chrono::seconds(60));
+
         glfwSetWindowUserPointer(window.get(), this);
         glfwSetKeyCallback(window.get(), [](GLFWwindow* native_window, int key, int, int action, int) {
             if (action != GLFW_PRESS && action != GLFW_REPEAT) {
@@ -116,6 +135,9 @@ struct Application::Impl final {
     GlfwRuntime runtime;
     Window window;
     std::unique_ptr<Engine> engine;
+
+    std::unique_ptr<network::EnvironmentSystem> environment;
+
 };
 
 Application::Application(Config config) : impl_{std::make_unique<Impl>(std::move(config))} {}
@@ -147,7 +169,7 @@ int Application::run() {
         if (++frame_count == 60) {
             extern void save_framebuffer_to_png(int, int, const std::string&);
             save_framebuffer_to_png(width, height, "/home/sgarwood/.gemini/antigravity-cli/brain/66790bf0-eae1-40b0-8b7f-3241d4cd3b8a/aerodynamics_render.png");
-            break;
+
         }
 
     }

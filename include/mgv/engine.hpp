@@ -49,6 +49,13 @@ struct SetEntityTransformCommand final {
 };
 
 
+
+struct SetWeatherCommand final {
+    float temperature_c;
+    float wind_speed_mps;
+    float wind_direction_deg;
+};
+
 struct SetEntityVelocityCommand final {
     EntityId entity;
     physics::LinearVelocity linear;
@@ -87,6 +94,7 @@ using EngineCommand = std::variant<
     SetEntityTransformCommand,
     ApplyEntityImpulseCommand,
     SetEntityVelocityCommand,
+    SetWeatherCommand,
     PlayAnimationCommand,
     PauseAnimationCommand,
     StopAnimationCommand,

@@ -113,7 +113,7 @@ public:
             
             if (v_air_len > 0.0F && body.inverse_mass() > 0.0F) {
                 // Approximate golf ball constants
-                const float rho = 1.225F;
+                const float rho = air_density_;
                 const float r = 0.02135F;
                 const float A = 3.14159265F * r * r;
                 const float mass = body.mass_.kilograms();
@@ -263,6 +263,7 @@ public:
     std::deque<RigidBody> bodies;
     std::vector<Collision> collisions;
     LinearVelocity wind_{};
+    float air_density_{1.225F};
     double accumulated_time{};
     std::uint64_t next_id{1};
 };
@@ -284,6 +285,11 @@ PhysicsWorld::PhysicsWorld(
 PhysicsWorld::~PhysicsWorld() = default;
 PhysicsWorld::PhysicsWorld(PhysicsWorld&&) noexcept = default;
 PhysicsWorld& PhysicsWorld::operator=(PhysicsWorld&&) noexcept = default;
+
+
+void PhysicsWorld::set_air_density(float rho) {
+    impl_->air_density_ = rho;
+}
 
 void PhysicsWorld::set_wind(LinearVelocity wind) {
     impl_->wind_ = wind;

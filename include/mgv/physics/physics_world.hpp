@@ -37,6 +37,7 @@ public:
     [[nodiscard]] std::span<const Collision> collisions() const noexcept;
 
     void set_wind(LinearVelocity wind);
+    void set_air_density(float rho);
     void apply_impulse(BodyId id, Impulse impulse);
     void set_velocity(BodyId id, LinearVelocity linear, AngularVelocity angular);
     void simulate(Duration elapsed_time);

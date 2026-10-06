@@ -10,37 +10,40 @@ HttpBackendClient::HttpBackendClient(std::string base_url)
     : base_url_(std::move(base_url)) {}
 
 std::optional<WeatherCondition> HttpBackendClient::fetch_course_weather(int course_id) {
-    httplib::Client cli(base_url_);
-    
-    // Set a reasonable timeout so we don't hang the background thread forever
-    cli.set_connection_timeout(5, 0); // 5 seconds
+    // Hardcode Open-Meteo for St. Andrews Golf Course for the vertical slice!
+    // (In full version, backend returns lat/lon for course_id)
+    httplib::Client cli("http://api.open-meteo.com");
+    cli.set_connection_timeout(5, 0);
     cli.set_read_timeout(5, 0);
     
-    std::string path = "/courses/" + std::to_string(course_id) + "/weather";
+    // St. Andrews coordinates
+    std::string path = "/v1/forecast?latitude=56.34&longitude=-2.81&current_weather=true";
     
     if (auto res = cli.Get(path.c_str())) {
         if (res->status == 200) {
             try {
                 auto json = nlohmann::json::parse(res->body);
+                auto current = json["current_weather"];
                 
                 WeatherCondition condition{};
-                condition.temperature_c = json.value("temperatureC", 20.0f);
-                condition.wind_speed_mps = json.value("windSpeedMps", 0.0f);
-                condition.wind_direction_deg = json.value("windDirectionDeg", 0.0f);
-                condition.is_raining = json.value("isRaining", false);
-                condition.turf_wetness = json.value("turfWetness", 0.0f);
+                condition.temperature_c = current.value("temperature", 20.0f);
+                // Open-Meteo gives wind in km/h. Convert to m/s:
+                float wind_kmh = current.value("windspeed", 0.0f);
+                condition.wind_speed_mps = wind_kmh / 3.6f;
+                condition.wind_direction_deg = current.value("winddirection", 0.0f);
+                condition.is_raining = false; // We can parse weathercode later
+                condition.turf_wetness = 0.0f;
                 
+                std::cout << "Fetched Live Weather for St. Andrews: " 
+                          << condition.temperature_c << "C, Wind: " 
+                          << condition.wind_speed_mps << " m/s\n";
+                          
                 return condition;
-            } catch (const nlohmann::json::parse_error& e) {
+            } catch (const nlohmann::json::exception& e) {
                 std::cerr << "Failed to parse weather JSON: " << e.what() << '\n';
             }
-        } else {
-            std::cerr << "Failed to fetch weather. HTTP Status: " << res->status << '\n';
         }
-    } else {
-        std::cerr << "Failed to connect to backend: " << to_string(res.error()) << '\n';
     }
-    
     return std::nullopt;
 }
 

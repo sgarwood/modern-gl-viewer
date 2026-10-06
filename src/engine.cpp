@@ -1,3 +1,6 @@
+#include <cmath>
+#include <iostream>
+#include <mutex>
 #include "mgv/engine.hpp"
 
 #include "mgv/camera_controller.hpp"
@@ -131,6 +134,18 @@ struct Engine::Impl final {
                     auto& entity = find(value.entity);
                     entity.transform = std::move(value.transform);
                     renderer.set_renderable_transform(entity.renderable, entity.transform);
+                
+                } else if constexpr (std::is_same_v<Command, SetWeatherCommand>) {
+                    float temp_k = value.temperature_c + 273.15f;
+                    float rho = 101325.0f / (287.058f * temp_k);
+                    physics_world.set_air_density(rho);
+                    
+                    float rad = value.wind_direction_deg * (3.14159265f / 180.0f);
+                    float vx = value.wind_speed_mps * std::sin(rad);
+                    float vz = -value.wind_speed_mps * std::cos(rad);
+                    physics_world.set_wind(physics::LinearVelocity{Vec3{vx, 0.0f, vz}});
+                    
+                    std::cout << "Engine applied live weather: Rho=" << rho << " kg/m^3, Wind=(" << vx << ", 0, " << vz << ")" << std::endl;
                 } else if constexpr (std::is_same_v<Command, ApplyEntityImpulseCommand>) {
                     const auto& entity = find(value.entity);
                     if (!entity.body) {
@@ -153,10 +168,16 @@ struct Engine::Impl final {
             std::move(command));
     }
 
-    void drain_commands() {
-        while (!commands.empty()) {
-            auto command = std::move(commands.front());
-            commands.pop_front();
+void drain_commands() {
+        std::deque<EngineCommand> local_commands;
+        {
+            std::lock_guard<std::mutex> lock(commands_mutex);
+            local_commands = std::move(commands);
+            commands.clear();
+        }
+        while (!local_commands.empty()) {
+            auto command = std::move(local_commands.front());
+            local_commands.pop_front();
             execute(std::move(command));
         }
     }
@@ -188,6 +209,7 @@ struct Engine::Impl final {
     animation::AnimationSystem animation_system;
     std::unique_ptr<InputSink> camera_input;
     std::deque<EngineCommand> commands;
+    std::mutex commands_mutex;
     std::vector<EntityRecord> entities;
     std::unique_ptr<network::NetworkEventSource> network_events;
     std::unique_ptr<NetworkEventDecoder> network_decoder;
@@ -277,6 +299,7 @@ void Engine::remove(EntityId entity) {
 }
 
 void Engine::enqueue(EngineCommand command) {
+    std::lock_guard<std::mutex> lock(impl_->commands_mutex);
     impl_->commands.push_back(std::move(command));
 }
 
