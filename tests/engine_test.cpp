@@ -433,3 +433,44 @@ TEST_CASE("engine requires a bound active ball before attaching a launch monitor
         std::logic_error);
     CHECK_FALSE(monitor_probe.started);
 }
+
+TEST_CASE("engine keeps an active golf ball on an unrendered static world collider") {
+    RenderProbe probe;
+    auto clock = std::make_unique<FakeClock>();
+    auto* clock_view = clock.get();
+    mgv::physics::PhysicsConfiguration physics;
+    physics.fixed_time_step = mgv::physics::Duration{0.01F};
+    mgv::Engine engine{
+        std::make_unique<FakeBackend>(probe), std::move(clock), physics};
+    const auto ball = engine.set_scene(triangle_scene()).front();
+    static_cast<void>(engine.bind_golf_ball(
+        ball,
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::sphere(mgv::physics::Length{0.8F})}
+            .at(mgv::physics::Position{{0.0F, 0.8F, 0.0F}})
+            .mass(mgv::physics::Mass{0.04593F})
+            .build()));
+    static_cast<void>(engine.add_static_collider(
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::box(mgv::physics::Dimensions{{100.0F, 0.5F, 100.0F}})}
+            .motion(mgv::physics::MotionType::static_body)
+            .at(mgv::physics::Position{{0.0F, -0.5F, 0.0F}})
+            .build()));
+
+    clock_view->advance(std::chrono::duration<float>{0.1F});
+    engine.tick({800, 600});
+
+    CHECK(engine.transform(ball).position().y == Catch::Approx(0.8F).margin(0.001F));
+}
+
+TEST_CASE("engine accepts only static bodies as unrendered world colliders") {
+    RenderProbe probe;
+    mgv::Engine engine{
+        std::make_unique<FakeBackend>(probe), std::make_unique<FakeClock>()};
+
+    CHECK_THROWS_AS(
+        engine.add_static_collider(mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::sphere(mgv::physics::Length{1.0F})}
+            .build()),
+        std::invalid_argument);
+}

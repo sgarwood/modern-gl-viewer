@@ -149,6 +149,8 @@ public:
     [[nodiscard]] physics::BodyId bind_golf_ball(
         EntityId entity,
         physics::RigidBodyDefinition body);
+    [[nodiscard]] physics::BodyId add_static_collider(
+        physics::RigidBodyDefinition body);
     [[nodiscard]] animation::AnimationClipId load_animation(
         const animation::AnimationAssetPaths& assets);
     [[nodiscard]] animation::AnimationPlayerId bind_animation(
