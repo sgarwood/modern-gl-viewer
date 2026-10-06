@@ -395,6 +395,13 @@ physics::BodyId Engine::bind_golf_ball(
     return id;
 }
 
+physics::BodyId Engine::add_static_collider(physics::RigidBodyDefinition body) {
+    if (body.motion() != physics::MotionType::static_body) {
+        throw std::invalid_argument{"World collider must be static"};
+    }
+    return impl_->physics_world.add_body(std::move(body));
+}
+
 animation::AnimationClipId Engine::load_animation(
     const animation::AnimationAssetPaths& assets) {
     return impl_->animation_system.load(assets);
