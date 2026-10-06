@@ -1,3 +1,5 @@
+#include "mgv/screenshot.hpp"
+
 #include <glad/gl.h>
 
 #include <cstddef>
@@ -8,7 +10,9 @@
 #include <vector>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
+#include <stb_image_write.h>
+
+namespace mgv {
 
 void save_framebuffer_to_png(int width, int height, const std::string& path) {
     if (width <= 0 || height <= 0) {
@@ -42,3 +46,5 @@ void save_framebuffer_to_png(int width, int height, const std::string& path) {
         std::cout << "Saved framebuffer to " << path << '\n';
     }
 }
+
+} // namespace mgv
