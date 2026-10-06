@@ -19,6 +19,19 @@ std::vector<float> g_ball_trail;
 
 namespace mgv {
 
+enum class GameState {
+    Setup,
+    InFlight,
+    Hike,
+    RangeFinder,
+    Retrieval
+};
+
+struct PathfindingNode {
+    Vec3 pos;
+};
+
+
 // Global trail points for shader hack
 #include <vector>
 std::vector<float> g_ball_trail;
@@ -26,6 +39,7 @@ std::vector<float> g_ball_trail;
 
 namespace {
     Vec3 subtract(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+    float length(const Vec3& a) { return std::sqrt(a.x*a.x + a.y*a.y + a.z*a.z); }
     Vec3 add(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
     Vec3 scaled(const Vec3& a, float s) { return {a.x * s, a.y * s, a.z * s}; }
     Vec3 cross(const Vec3& a, const Vec3& b) {
@@ -243,10 +257,8 @@ struct Engine::Impl final {
                     float vz = -value.wind_speed_mps * std::cos(rad);
                     physics_world.set_wind(physics::LinearVelocity{Vec3{vx, 0.0f, vz}});
                     
-                    // Simple mock for wetness based on temperature and wind just to show dynamic behavior
                     float wetness = (value.temperature_c < 15.0f) ? 0.8f : 0.0f; 
                     physics_world.set_wetness(wetness);
-                    
                     std::cout << "Engine applied live weather: Rho=" << rho << " kg/m^3, Wind=(" << vx << ", 0, " << vz << "), Wetness=" << wetness << std::endl;
                 } else if constexpr (std::is_same_v<Command, ApplyEntityImpulseCommand>) {
                     const auto& entity = find(value.entity);
@@ -321,6 +333,13 @@ void drain_commands() {
     std::unique_ptr<InputSink> camera_input;
     std::deque<EngineCommand> commands;
     std::mutex commands_mutex;
+
+    GameState sm_state_{GameState::Setup};
+    std::optional<EntityId> sm_golf_ball_;
+    float sm_timer_{0.0f};
+    Vec3 sm_hike_start_;
+    Vec3 sm_hike_target_;
+
     std::vector<EntityRecord> entities;
     std::unique_ptr<network::NetworkEventSource> network_events;
     std::unique_ptr<NetworkEventDecoder> network_decoder;
@@ -514,6 +533,75 @@ void Engine::tick(Viewport viewport) {
     impl_->previous_tick = now;
     impl_->animation_system.advance(animation::AnimationDuration{elapsed});
     impl_->synchronize_animation();
+
+    // --- STATE MACHINE ---
+    if (impl_->sm_golf_ball_ && impl_->sm_state_ != GameState::RangeFinder) {
+        auto& ball_rec = impl_->find(*impl_->sm_golf_ball_);
+        if (ball_rec.body) {
+            auto& rb = impl_->physics_world.body(*ball_rec.body);
+            float speed = length(rb.linear_velocity().metres_per_second());
+            Vec3 ball_pos = rb.position().metres();
+            Vec3 hole_pos{0.0f, 0.0f, -10.0f}; 
+            
+            if (impl_->sm_state_ == GameState::Setup) {
+                if (speed > 1.0f) {
+                    impl_->sm_state_ = GameState::InFlight;
+                    std::cout << "[SM] Transition to InFlight!" << std::endl;
+                }
+            } else if (impl_->sm_state_ == GameState::InFlight) {
+                if (speed < 0.05f && rb.position().metres().y < 1.0f) {
+                    float dist = length(subtract(ball_pos, hole_pos));
+                    if (dist < 1.0f) {
+                        impl_->sm_state_ = GameState::Retrieval;
+                        impl_->sm_timer_ = 0.0f;
+                        std::cout << "[SM] HOLED! Transition to Retrieval!" << std::endl;
+                    } else {
+                        impl_->sm_state_ = GameState::Hike;
+                        impl_->sm_timer_ = 0.0f;
+                        impl_->sm_hike_start_ = impl_->renderer.camera().position();
+                        impl_->sm_hike_target_ = add(ball_pos, Vec3{2.0f, 2.0f, 2.0f});
+                        std::cout << "[SM] Ball stopped. Transition to Hike." << std::endl;
+                    }
+                }
+            } else if (impl_->sm_state_ == GameState::Hike) {
+                impl_->sm_timer_ += elapsed;
+                float t = std::min(impl_->sm_timer_ / 4.0f, 1.0f);
+                
+                Vec3 mid = add(scaled(impl_->sm_hike_start_, 0.5f), scaled(impl_->sm_hike_target_, 0.5f));
+                if (mid.z < -2.0f && mid.z > -8.0f) mid.x += 5.0f; 
+                
+                Vec3 p1 = add(scaled(impl_->sm_hike_start_, 1.0f - t), scaled(mid, t));
+                Vec3 p2 = add(scaled(mid, 1.0f - t), scaled(impl_->sm_hike_target_, t));
+                Vec3 cam_pos = add(scaled(p1, 1.0f - t), scaled(p2, t));
+                cam_pos.y = 1.5f + std::sin(impl_->sm_timer_ * 10.0f) * 0.1f;
+                
+                auto cam = impl_->renderer.camera();
+                cam.look_at(cam_pos, ball_pos);
+                impl_->renderer.set_camera(cam);
+                
+                if (t >= 1.0f) {
+                    impl_->sm_state_ = GameState::Setup;
+                    std::cout << "[SM] Reached ball. Setup." << std::endl;
+                }
+            } else if (impl_->sm_state_ == GameState::Retrieval) {
+                impl_->sm_timer_ += elapsed;
+                float t = std::min(impl_->sm_timer_ / 2.0f, 1.0f);
+                
+                auto cam = impl_->renderer.camera();
+                Vec3 t_cam = add(hole_pos, Vec3{0.0f, 1.5f, 0.5f});
+                Vec3 cam_pos = add(scaled(cam.position(), 1.0f - t), scaled(t_cam, t));
+                cam.look_at(cam_pos, hole_pos);
+                impl_->renderer.set_camera(cam);
+                
+                if (impl_->sm_timer_ > 2.0f) {
+                    std::cout << "[SM] Retrieving ball..." << std::endl;
+                    impl_->physics_world.set_velocity(*ball_rec.body, physics::LinearVelocity{{0, 5, 0}}, physics::AngularVelocity{{0,0,0}});
+                    impl_->sm_state_ = GameState::Setup;
+                }
+            }
+        }
+    }
+
     impl_->physics_world.simulate(physics::Duration{elapsed});
     impl_->synchronize_physics();
 
