@@ -17,7 +17,7 @@ jobs:
         name: Install build tools
         command: 'sudo apt-get update
 
-          sudo apt-get install --yes ninja-build npm
+          sudo apt-get install --yes ninja-build
 
           '
     - run:
@@ -29,12 +29,8 @@ jobs:
         name: Build
         command: cmake --build build/ci --parallel
     - run:
-        name: Start Mock Backend
-        background: true
-        command: npx -y @stoplight/prism-cli mock backend/openapi.yaml -p 5000
-    - run:
         name: Test
-        command: sleep 5 && ctest --test-dir build/ci --output-on-failure
+        command: ctest --test-dir build/ci --output-on-failure
   build_windows:
     machine:
       image: windows-server-2022-gui:2025.10.1

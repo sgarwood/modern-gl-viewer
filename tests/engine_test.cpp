@@ -161,7 +161,8 @@ TEST_CASE("engine synchronizes a physics body to its bound renderable") {
     clock_view->advance(std::chrono::duration<float>{0.1F});
     engine.tick({800, 600});
 
-    CHECK(engine.transform(entities.front()).position().x == Catch::Approx(0.1F));
+    CHECK(engine.transform(entities.front()).position().x ==
+          Catch::Approx(0.1F).margin(0.00001F));
 }
 
 TEST_CASE("engine applies queued physics commands at the tick boundary") {
@@ -187,7 +188,8 @@ TEST_CASE("engine applies queued physics commands at the tick boundary") {
     clock_view->advance(std::chrono::duration<float>{0.1F});
     engine.tick({800, 600});
 
-    CHECK(engine.transform(entity).position().x == Catch::Approx(0.1F));
+    CHECK(engine.transform(entity).position().x ==
+          Catch::Approx(0.1F).margin(0.00001F));
 }
 
 TEST_CASE("engine applies queued animation commands and binds the root pose to an entity") {

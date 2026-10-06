@@ -26,8 +26,12 @@ TEST_CASE("golf ball with backspin generates lift (magnus effect)") {
     
     // Ball 1: No spin
     const auto no_spin = world.add_body(golf_ball({0.0F, 0.0F, 0.0F}, {50.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 0.0F}));
-    // Ball 2: Backspin (spinning around Z axis negatively relative to X-forward velocity)
-    const auto backspin = world.add_body(golf_ball({0.0F, 0.0F, 0.0F}, {50.0F, 0.0F, 0.0F}, {0.0F, 0.0F, -300.0F}));
+    // Positive Z angular velocity is backspin for travel along +X in the
+    // engine's right-handed, Y-up coordinate system.
+    const auto backspin = world.add_body(golf_ball(
+        {0.0F, 0.0F, 0.0F},
+        {50.0F, 0.0F, 0.0F},
+        {0.0F, 0.0F, 300.0F}));
 
     world.simulate(mgv::physics::Duration{0.1F});
 

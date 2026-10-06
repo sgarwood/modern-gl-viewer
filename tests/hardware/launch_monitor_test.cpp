@@ -6,9 +6,18 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include <chrono>
+#include <cstdint>
+#include <future>
 #include <optional>
-#include <variant>
 #include <thread>
+#include <variant>
+
+#ifndef _WIN32
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 using namespace mgv::hardware;
 
@@ -95,50 +104,57 @@ TEST_CASE("Vertex adapter parses GATT BLE payload into putt ShotData") {
     CHECK(putt_data.loft_angle_deg == Catch::Approx(3.0F)); 
 }
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <chrono>
-
+#ifndef _WIN32
 TEST_CASE("MLM2PRO adapter receives and parses GSPro JSON over local TCP socket", "[integration]") {
-    Mlm2ProAdapter adapter{std::make_unique<GSProJsonParser>()};
-    std::optional<ShotData> received_shot;
+    constexpr std::uint16_t test_port{19'210};
+    Mlm2ProAdapter adapter{std::make_unique<GSProJsonParser>(), test_port};
+    std::promise<ShotData> received_promise;
+    auto received_future = received_promise.get_future();
 
     adapter.set_callback([&](const ShotData& data) {
-        received_shot = data;
+        received_promise.set_value(data);
     });
 
     adapter.start();
 
-    // Give the server thread a moment to bind and listen
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-    // Client socket to spoof GSPro payload
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    REQUIRE(sock != -1);
-
     struct sockaddr_in serv_addr{};
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(921);
-    inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+    serv_addr.sin_port = htons(test_port);
+    REQUIRE(inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) == 1);
 
-    if (connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) == 0) {
-        std::string payload = R"({"BallData":{"Speed":150.0,"HLA":2.5,"VLA":10.5,"TotalSpin":2800.0,"SpinAxis":-5.0}})";
-        send(sock, payload.c_str(), payload.size(), 0);
+    int client_socket{-1};
+    for (int attempt = 0; attempt < 100 && client_socket == -1; ++attempt) {
+        const auto candidate = socket(AF_INET, SOCK_STREAM, 0);
+        REQUIRE(candidate != -1);
+        if (connect(
+                candidate,
+                reinterpret_cast<struct sockaddr*>(&serv_addr),
+                sizeof(serv_addr)) == 0) {
+            client_socket = candidate;
+        } else {
+            close(candidate);
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        }
     }
+    REQUIRE(client_socket != -1);
 
-    close(sock);
+    const std::string payload =
+        R"({"BallData":{"Speed":150.0,"HLA":2.5,"VLA":10.5,"TotalSpin":2800.0,"SpinAxis":-5.0}})";
+    const auto sent = send(client_socket, payload.data(), payload.size(), 0);
+    REQUIRE(sent == static_cast<ssize_t>(payload.size()));
+    close(client_socket);
 
-    // Give the server thread a moment to receive and parse
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    REQUIRE(received_future.wait_for(std::chrono::seconds{2}) ==
+            std::future_status::ready);
+    const auto received_shot = received_future.get();
     adapter.stop();
 
-    REQUIRE(received_shot.has_value());
-    REQUIRE(std::holds_alternative<FullSwingData>(received_shot.value()));
+    REQUIRE(std::holds_alternative<FullSwingData>(received_shot));
     
-    auto fs_data = std::get<FullSwingData>(received_shot.value());
+    const auto fs_data = std::get<FullSwingData>(received_shot);
     CHECK(fs_data.ball_speed_mps == Catch::Approx(150.0F * 0.44704F)); // mph to m/s
     CHECK(fs_data.launch_angle_deg == Catch::Approx(10.5F));
     CHECK(fs_data.launch_direction_deg == Catch::Approx(2.5F));
     CHECK(fs_data.total_spin_rpm == Catch::Approx(2800.0F));
 }
+#endif

@@ -125,6 +125,10 @@ target_link_libraries(mgv_network
 if(WIN32)
     target_link_libraries(mgv_network PRIVATE ws2_32)
 endif()
+if(MSVC)
+    # cpp-httplib intentionally uses constant conditions in platform branches.
+    target_compile_options(mgv_network PRIVATE /wd4127)
+endif()
 
 add_library(mgv_hardware
     src/hardware/gspro_json_parser.cpp
@@ -366,6 +370,9 @@ if(BUILD_TESTING)
     target_compile_definitions(mgv_tests PRIVATE
         MGV_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
     )
+    if(MSVC)
+        target_compile_options(mgv_tests PRIVATE /wd4127)
+    endif()
 
     if(TARGET mgv_qt_frontend)
         target_sources(mgv_tests PRIVATE tests/qt/main_menu_controller_test.cpp)

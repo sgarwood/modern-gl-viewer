@@ -15,16 +15,17 @@
 
 namespace mgv::hardware {
 
-Mlm2ProAdapter::Mlm2ProAdapter(std::unique_ptr<IShotDataParser> parser) 
-    : parser_(std::move(parser)) {}
+Mlm2ProAdapter::Mlm2ProAdapter(
+    std::unique_ptr<IShotDataParser> parser,
+    std::uint16_t port)
+    : parser_(std::move(parser)), port_{port} {}
 
 void Mlm2ProAdapter::set_callback(ShotCallback callback) {
     callback_ = std::move(callback);
 }
 
 void Mlm2ProAdapter::start() {
-    if (is_running_) return;
-    is_running_ = true;
+    if (is_running_.exchange(true)) return;
     
     listener_thread_ = std::jthread([this](std::stop_token stoken) {
 #ifndef _WIN32
@@ -32,12 +33,15 @@ void Mlm2ProAdapter::start() {
         if (server_fd == -1) return;
 
         int opt = 1;
-        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#ifdef SO_REUSEPORT
+        setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+#endif
 
         struct sockaddr_in address{};
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = INADDR_ANY;
-        address.sin_port = htons(921); // GSPro default port
+        address.sin_port = htons(port_);
 
         if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
             close(server_fd);
@@ -75,7 +79,7 @@ void Mlm2ProAdapter::start() {
 }
 
 void Mlm2ProAdapter::stop() {
-    is_running_ = false;
+    is_running_.store(false);
     if (listener_thread_.joinable()) {
         listener_thread_.request_stop();
         listener_thread_.join();
@@ -83,7 +87,7 @@ void Mlm2ProAdapter::stop() {
 }
 
 void Mlm2ProAdapter::simulate_shot_received(float speed, float launch, float direction, float spin, float axis) {
-    if (is_running_ && callback_) {
+    if (is_running_.load() && callback_) {
         FullSwingData data{};
         data.ball_speed_mps = speed;
         data.launch_angle_deg = launch;
@@ -98,7 +102,7 @@ void Mlm2ProAdapter::handle_payload(const std::string& payload) {
     if (!parser_) return;
     
     auto parsed_data = parser_->parse(payload);
-    if (parsed_data.has_value() && callback_ && is_running_) {
+    if (parsed_data.has_value() && callback_ && is_running_.load()) {
         callback_(parsed_data.value());
     }
 }
