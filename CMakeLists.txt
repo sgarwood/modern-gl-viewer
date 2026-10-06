@@ -61,7 +61,7 @@ add_library(mgv_core
     src/obj_loader.cpp
     src/renderer.cpp
     src/runtime_paths.cpp
-    src/scene.cpp
+    src/scene.cpp src/screenshot.cpp src/screenshot.cpp
     src/shader_loader.cpp
     src/texture.cpp
     src/transform.cpp
