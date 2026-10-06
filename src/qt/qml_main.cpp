@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
     MainMenuController controller{
         launcher,
         {
-            .model = asset_directory / "cube.obj",
+            .model = asset_directory / "ball.obj",
             .vertex_shader = asset_directory / "shaders/default.vert",
             .fragment_shader = asset_directory / "shaders/default.frag",
         },

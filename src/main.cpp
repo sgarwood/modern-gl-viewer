@@ -10,7 +10,7 @@
 namespace {
 
 struct Arguments final {
-    std::filesystem::path model{std::filesystem::path{MGV_DEFAULT_ASSET_DIR} / "cube.obj"};
+    std::filesystem::path model{std::filesystem::path{MGV_DEFAULT_ASSET_DIR} / "ball.obj"};
     std::filesystem::path vertex{std::filesystem::path{MGV_DEFAULT_ASSET_DIR} / "shaders/default.vert"};
     std::filesystem::path fragment{std::filesystem::path{MGV_DEFAULT_ASSET_DIR} / "shaders/default.frag"};
 };

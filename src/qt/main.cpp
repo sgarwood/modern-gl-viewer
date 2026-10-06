@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
     const auto positional = parser.positionalArguments();
     QtViewerWindow window{{
         .model = positional.empty()
-            ? asset_directory / "cube.obj"
+            ? asset_directory / "ball.obj"
             : path_from(positional.front()),
         .vertex_shader = path_from(parser.value(vertex_option)),
         .fragment_shader = path_from(parser.value(fragment_option)),

@@ -66,6 +66,27 @@ using Window = std::unique_ptr<GLFWwindow, WindowDeleter>;
     return window;
 }
 
+void configure_golf_session(Engine& engine, const AssetPaths& assets) {
+    const auto entities = engine.load(assets);
+    if (entities.empty()) {
+        throw std::runtime_error{"Golf session requires a renderable ball"};
+    }
+    static_cast<void>(engine.bind_golf_ball(
+        entities.front(),
+        physics::RigidBodyBuilder{
+            physics::Collider::sphere(physics::Length{0.8F})}
+            .at(physics::Position{{0.0F, 0.8F, 0.0F}})
+            .mass(physics::Mass{0.04593F})
+            .restitution(0.78F)
+            .build()));
+    static_cast<void>(engine.add_static_collider(
+        physics::RigidBodyBuilder{
+            physics::Collider::box(physics::Dimensions{{100.0F, 0.5F, 100.0F}})}
+            .motion(physics::MotionType::static_body)
+            .at(physics::Position{{0.0F, -0.5F, 0.0F}})
+            .build()));
+}
+
 } // namespace
 
 struct Application::Impl final {
@@ -76,13 +97,7 @@ struct Application::Impl final {
         engine = std::make_unique<Engine>(make_opengl_backend([](const char* name) {
             return glfwGetProcAddress(name);
         }));
-        // Add a ground plane body for the raycaster and physics
-        auto entities = engine->load(config.assets);
-        if (!entities.empty()) {
-            engine->bind_physics(entities[0], physics::RigidBodyBuilder{
-                physics::Collider::box(physics::Dimensions{{1000.0f, 0.5f, 1000.0f}})
-            }.motion(physics::MotionType::static_body).at(physics::Position{{0.0f, -0.5f, 0.0f}}).build());
-        }
+        configure_golf_session(*engine, config.assets);
 
         environment = std::make_unique<network::EnvironmentSystem>(
             std::make_unique<network::HttpBackendClient>("")
@@ -165,25 +180,7 @@ int Application::run() {
             .framebuffer_width = std::max(width, 1),
             .framebuffer_height = std::max(height, 1),
         });
-        
-        static int frame_count = 0;
-        if (frame_count == 10) {
-            impl_->engine->enqueue(InputAction::toggle_range_finder);
-        }
-        if (frame_count == 30) {
-            impl_->engine->enqueue(InputAction::range_finder_ping);
-        }
-        if (frame_count == 1) {
-            impl_->engine->enqueue(InputAction::fire_test_shot);
-        }
-        
         glfwSwapBuffers(impl_->window.get());
-        if (++frame_count == 60) {
-            extern void save_framebuffer_to_png(int, int, const std::string&);
-            save_framebuffer_to_png(width, height, "/home/sgarwood/.gemini/antigravity-cli/brain/66790bf0-eae1-40b0-8b7f-3241d4cd3b8a/aerodynamics_render.png");
-
-        }
-
     }
     return 0;
 }

@@ -11,7 +11,34 @@
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <stdexcept>
 #include <utility>
+
+namespace {
+
+void configure_golf_session(mgv::Engine& engine, const mgv::AssetPaths& assets) {
+    const auto entities = engine.load(assets);
+    if (entities.empty()) {
+        throw std::runtime_error{"Golf session requires a renderable ball"};
+    }
+    static_cast<void>(engine.bind_golf_ball(
+        entities.front(),
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::sphere(mgv::physics::Length{0.8F})}
+            .at(mgv::physics::Position{{0.0F, 0.8F, 0.0F}})
+            .mass(mgv::physics::Mass{0.04593F})
+            .restitution(0.78F)
+            .build()));
+    static_cast<void>(engine.add_static_collider(
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::box(
+                mgv::physics::Dimensions{{100.0F, 0.5F, 100.0F}})}
+            .motion(mgv::physics::MotionType::static_body)
+            .at(mgv::physics::Position{{0.0F, -0.5F, 0.0F}})
+            .build()));
+}
+
+} // namespace
 
 QtViewerWidget::QtViewerWidget(mgv::AssetPaths assets, QWidget* parent)
     : QOpenGLWidget{parent}, assets_{std::move(assets)} {
@@ -34,7 +61,7 @@ void QtViewerWidget::load_assets(mgv::AssetPaths assets) {
 
     makeCurrent();
     try {
-        engine_->load(assets_);
+        configure_golf_session(*engine_, assets_);
         error_.clear();
         animation_timer_.start();
     } catch (const std::exception& error) {
@@ -64,7 +91,7 @@ void QtViewerWidget::initializeGL() {
             const auto* current = QOpenGLContext::currentContext();
             return current == nullptr ? nullptr : current->getProcAddress(QByteArray{name});
         }));
-        engine_->load(assets_);
+        configure_golf_session(*engine_, assets_);
         error_.clear();
         animation_timer_.start();
     } catch (const std::exception& error) {
