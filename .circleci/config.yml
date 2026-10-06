@@ -267,8 +267,6 @@ jobs:
         command: sleep 5 && ctest --test-dir build/ci --output-on-failure
 workflows:
   build_matrix:
-    when:
-      not: << pipeline.parameters.run_release >>
     jobs:
     - build_ubuntu
     - build_windows
