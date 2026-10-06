@@ -213,7 +213,7 @@ if(MGV_BUILD_GLFW_APP)
         PRIVATE mgv::opengl glfw mgv::project_warnings
     )
 
-    add_executable(mgv src/main.cpp)
+    add_executable(mgv src/main.cpp src/screenshot.cpp)
     target_compile_features(mgv PRIVATE cxx_std_20)
     target_link_libraries(mgv PRIVATE mgv::glfw_app mgv::project_warnings)
     target_compile_definitions(mgv PRIVATE

@@ -1,5 +1,7 @@
 #include "mgv/engine.hpp"
 
+#include "animation/ozz_test_assets.hpp"
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -186,6 +188,40 @@ TEST_CASE("engine applies queued physics commands at the tick boundary") {
     engine.tick({800, 600});
 
     CHECK(engine.transform(entity).position().x == Catch::Approx(0.1F));
+}
+
+TEST_CASE("engine applies queued animation commands and binds the root pose to an entity") {
+    const TestAnimationAssets assets;
+    RenderProbe probe;
+    auto clock = std::make_unique<FakeClock>();
+    auto* clock_view = clock.get();
+    mgv::Engine engine{std::make_unique<FakeBackend>(probe), std::move(clock)};
+    const auto entity = engine.set_scene(triangle_scene()).front();
+    const auto clip = engine.load_animation(assets.paths());
+    const auto player = engine.bind_animation(entity, clip);
+
+    engine.enqueue(mgv::PlayAnimationCommand{player});
+    CHECK(engine.transform(entity).position().x == Catch::Approx(0.0F));
+    clock_view->advance(std::chrono::duration<float>{0.25F});
+    engine.tick({800, 600});
+    CHECK(engine.transform(entity).position().x == Catch::Approx(0.5F).margin(0.001F));
+
+    engine.enqueue(mgv::PauseAnimationCommand{player});
+    clock_view->advance(std::chrono::duration<float>{0.25F});
+    engine.tick({800, 600});
+    CHECK(engine.transform(entity).position().x == Catch::Approx(0.5F).margin(0.001F));
+}
+
+TEST_CASE("engine prevents animation and physics from owning the same entity transform") {
+    const TestAnimationAssets assets;
+    RenderProbe probe;
+    auto clock = std::make_unique<FakeClock>();
+    mgv::Engine engine{std::make_unique<FakeBackend>(probe), std::move(clock)};
+    const auto entity = engine.set_scene(triangle_scene()).front();
+    const auto clip = engine.load_animation(assets.paths());
+    static_cast<void>(engine.bind_physics(entity, moving_body()));
+
+    CHECK_THROWS_AS(engine.bind_animation(entity, clip), std::logic_error);
 }
 
 TEST_CASE("engine rejects removed entity handles without aliasing retained entities") {

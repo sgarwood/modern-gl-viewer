@@ -141,6 +141,9 @@ struct Manifold final {
 }
 
 
+
+
+
 [[nodiscard]] std::optional<Manifold> sphere_heightmap(
     const SphereCollider& sphere,
     Vec3 sphere_position,
@@ -257,6 +260,9 @@ std::optional<ContactManifold> DiscreteCollisionDetector::detect(
     }
     return ContactManifold{manifold->normal, Length{manifold->penetration}};
 }
+
+
+
 
 
 [[nodiscard]] std::optional<Manifold> sphere_heightmap(
