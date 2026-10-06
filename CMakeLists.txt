@@ -61,7 +61,7 @@ add_library(mgv_core
     src/obj_loader.cpp
     src/renderer.cpp
     src/runtime_paths.cpp
-    src/scene.cpp src/screenshot.cpp src/screenshot.cpp
+    src/scene.cpp
     src/shader_loader.cpp
     src/texture.cpp
     src/transform.cpp
@@ -173,12 +173,16 @@ if(MGV_BUILD_GLFW_APP OR MGV_BUILD_QT_APP OR MGV_BUILD_QML_APP)
     FetchContent_MakeAvailable(glad)
     glad_add_library(mgv_glad REPRODUCIBLE API gl:core=4.1)
 
-    add_library(mgv_opengl src/opengl/opengl_backend.cpp)
+    add_library(mgv_opengl
+        src/opengl/opengl_backend.cpp
+        src/screenshot.cpp
+    )
     add_library(mgv::opengl ALIAS mgv_opengl)
     target_compile_features(mgv_opengl PUBLIC cxx_std_20)
     target_include_directories(mgv_opengl PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     )
+    target_include_directories(mgv_opengl SYSTEM PRIVATE "${stb_SOURCE_DIR}")
     target_link_libraries(mgv_opengl PUBLIC mgv::core PRIVATE mgv_glad mgv::project_warnings)
 endif()
 
@@ -378,7 +382,6 @@ if(MGV_INSTALL_TARGETS)
     install(DIRECTORY assets/
         DESTINATION ${CMAKE_INSTALL_DATADIR}/modern-gl-viewer/assets
     )
-
     if(TARGET mgv_qml)
         if(Qt6_VERSION VERSION_LESS 6.5)
             # Qt 6.4 exposed this technology-preview output parameter under its

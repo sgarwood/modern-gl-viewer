@@ -22,6 +22,22 @@ TEST_CASE("collider value objects validate sphere and box dimensions") {
         std::invalid_argument);
 }
 
+TEST_CASE("heightmap colliders validate their grid and samples") {
+    const auto collider = mgv::physics::Collider::heightmap(
+        2, 3, 0.5F, 1.0F, {0.0F, 0.1F, 0.2F, 0.3F, 0.4F, 0.5F});
+    const auto& heightmap = std::get<mgv::physics::HeightmapCollider>(collider.shape());
+
+    CHECK(heightmap.width == 2);
+    CHECK(heightmap.depth == 3);
+    CHECK(heightmap.heights.size() == 6);
+    CHECK_THROWS_AS(
+        mgv::physics::Collider::heightmap(1, 2, 1.0F, 1.0F, {0.0F, 0.0F}),
+        std::invalid_argument);
+    CHECK_THROWS_AS(
+        mgv::physics::Collider::heightmap(2, 2, 1.0F, 1.0F, {0.0F}),
+        std::invalid_argument);
+}
+
 TEST_CASE("rigid body builder creates validated body definitions") {
     const auto definition = mgv::physics::RigidBodyBuilder{
         mgv::physics::Collider::sphere(mgv::physics::Length{0.5F})}

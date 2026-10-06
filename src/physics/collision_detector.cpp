@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -146,61 +147,60 @@ struct Manifold final {
     Vec3 sphere_position,
     const HeightmapCollider& heightmap,
     Vec3 heightmap_position) {
-    
-    // Transform sphere into heightmap local space
-    Vec3 local_pos = subtract(sphere_position, heightmap_position);
-    
-    // Map to grid coordinates
-    float gx = local_pos.x / heightmap.scale_x;
-    float gz = local_pos.z / heightmap.scale_z;
-    
-    // Check bounds
-    if (gx < 0 || gx >= heightmap.width - 1 || gz < 0 || gz >= heightmap.depth - 1) {
+    const auto local_pos = subtract(sphere_position, heightmap_position);
+    const auto grid_x = local_pos.x / heightmap.scale_x;
+    const auto grid_z = local_pos.z / heightmap.scale_z;
+    const auto maximum_x = static_cast<float>(heightmap.width - 1);
+    const auto maximum_z = static_cast<float>(heightmap.depth - 1);
+    if (grid_x < 0.0F || grid_x >= maximum_x ||
+        grid_z < 0.0F || grid_z >= maximum_z) {
         return std::nullopt;
     }
-    
-    int x0 = static_cast<int>(gx);
-    int z0 = static_cast<int>(gz);
-    float tx = gx - x0;
-    float tz = gz - z0;
-    
-    // Get heights of the 4 corners of the quad
-    float h00 = heightmap.heights[z0 * heightmap.width + x0];
-    float h10 = heightmap.heights[z0 * heightmap.width + (x0 + 1)];
-    float h01 = heightmap.heights[(z0 + 1) * heightmap.width + x0];
-    float h11 = heightmap.heights[(z0 + 1) * heightmap.width + (x0 + 1)];
-    
-    // Bilinear interpolation for height
-    float hy0 = h00 * (1 - tx) + h10 * tx;
-    float hy1 = h01 * (1 - tx) + h11 * tx;
-    float height_at_pos = hy0 * (1 - tz) + hy1 * tz;
-    
-    // If the sphere is above the ground by more than its radius, no collision
-    if (local_pos.y > height_at_pos + sphere.radius.metres()) {
+
+    const auto x0 = static_cast<int>(grid_x);
+    const auto z0 = static_cast<int>(grid_z);
+    const auto interpolation_x = grid_x - static_cast<float>(x0);
+    const auto interpolation_z = grid_z - static_cast<float>(z0);
+    const auto sample = [&heightmap](int x, int z) {
+        const auto index = static_cast<std::size_t>(z) *
+                               static_cast<std::size_t>(heightmap.width) +
+                           static_cast<std::size_t>(x);
+        return heightmap.heights[index];
+    };
+    const auto height00 = sample(x0, z0);
+    const auto height10 = sample(x0 + 1, z0);
+    const auto height01 = sample(x0, z0 + 1);
+    const auto height11 = sample(x0 + 1, z0 + 1);
+
+    const auto near_height =
+        height00 * (1.0F - interpolation_x) + height10 * interpolation_x;
+    const auto far_height =
+        height01 * (1.0F - interpolation_x) + height11 * interpolation_x;
+    const auto height_at_position =
+        near_height * (1.0F - interpolation_z) + far_height * interpolation_z;
+
+    if (local_pos.y > height_at_position + sphere.radius.metres()) {
         return std::nullopt;
     }
-    
-    // Calculate normal using cross product of diagonals
-    Vec3 v1 = {heightmap.scale_x, h10 - h00, 0.0f};
-    Vec3 v2 = {0.0f, h01 - h00, heightmap.scale_z};
+
+    const Vec3 v1{heightmap.scale_x, height10 - height00, 0.0F};
+    const Vec3 v2{0.0F, height01 - height00, heightmap.scale_z};
     Vec3 normal = {
         v1.y * v2.z - v1.z * v2.y,
         v1.z * v2.x - v1.x * v2.z,
-        v1.x * v2.y - v1.y * v2.x
+        v1.x * v2.y - v1.y * v2.x,
     };
-    
-    // Normalize
-    float mag = std::sqrt(dot(normal, normal));
-    if (mag > 0) {
-        normal = scaled(normal, 1.0f / mag);
+
+    const auto magnitude = std::sqrt(dot(normal, normal));
+    if (magnitude > 0.0F) {
+        normal = scaled(normal, 1.0F / magnitude);
     } else {
-        normal = {0.0f, 1.0f, 0.0f};
+        normal = {0.0F, 1.0F, 0.0F};
     }
-    
-    // Calculate penetration distance
-    float penetration = (height_at_pos + sphere.radius.metres()) - local_pos.y;
-    
-    if (penetration > 0) {
+
+    const auto penetration =
+        height_at_position + sphere.radius.metres() - local_pos.y;
+    if (penetration > 0.0F) {
         return Manifold{.normal = normal, .penetration = penetration};
     }
     return std::nullopt;
@@ -256,72 +256,6 @@ std::optional<ContactManifold> DiscreteCollisionDetector::detect(
         return std::nullopt;
     }
     return ContactManifold{manifold->normal, Length{manifold->penetration}};
-}
-
-
-[[nodiscard]] std::optional<Manifold> sphere_heightmap(
-    const SphereCollider& sphere,
-    Vec3 sphere_position,
-    const HeightmapCollider& heightmap,
-    Vec3 heightmap_position) {
-    
-    // Transform sphere into heightmap local space
-    Vec3 local_pos = subtract(sphere_position, heightmap_position);
-    
-    // Map to grid coordinates
-    float gx = local_pos.x / heightmap.scale_x;
-    float gz = local_pos.z / heightmap.scale_z;
-    
-    // Check bounds
-    if (gx < 0 || gx >= heightmap.width - 1 || gz < 0 || gz >= heightmap.depth - 1) {
-        return std::nullopt;
-    }
-    
-    int x0 = static_cast<int>(gx);
-    int z0 = static_cast<int>(gz);
-    float tx = gx - x0;
-    float tz = gz - z0;
-    
-    // Get heights of the 4 corners of the quad
-    float h00 = heightmap.heights[z0 * heightmap.width + x0];
-    float h10 = heightmap.heights[z0 * heightmap.width + (x0 + 1)];
-    float h01 = heightmap.heights[(z0 + 1) * heightmap.width + x0];
-    float h11 = heightmap.heights[(z0 + 1) * heightmap.width + (x0 + 1)];
-    
-    // Bilinear interpolation for height
-    float hy0 = h00 * (1 - tx) + h10 * tx;
-    float hy1 = h01 * (1 - tx) + h11 * tx;
-    float height_at_pos = hy0 * (1 - tz) + hy1 * tz;
-    
-    // If the sphere is above the ground by more than its radius, no collision
-    if (local_pos.y > height_at_pos + sphere.radius.metres()) {
-        return std::nullopt;
-    }
-    
-    // Calculate normal using cross product of diagonals
-    Vec3 v1 = {heightmap.scale_x, h10 - h00, 0.0f};
-    Vec3 v2 = {0.0f, h01 - h00, heightmap.scale_z};
-    Vec3 normal = {
-        v1.y * v2.z - v1.z * v2.y,
-        v1.z * v2.x - v1.x * v2.z,
-        v1.x * v2.y - v1.y * v2.x
-    };
-    
-    // Normalize
-    float mag = std::sqrt(dot(normal, normal));
-    if (mag > 0) {
-        normal = scaled(normal, 1.0f / mag);
-    } else {
-        normal = {0.0f, 1.0f, 0.0f};
-    }
-    
-    // Calculate penetration distance
-    float penetration = (height_at_pos + sphere.radius.metres()) - local_pos.y;
-    
-    if (penetration > 0) {
-        return Manifold{.normal = normal, .penetration = penetration};
-    }
-    return std::nullopt;
 }
 
 } // namespace mgv::physics

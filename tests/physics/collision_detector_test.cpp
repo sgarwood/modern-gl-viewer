@@ -108,3 +108,26 @@ TEST_CASE("sphere inside a box receives a deterministic escape manifold") {
     CHECK(contact->normal() == mgv::Vec3{-1.0F, 0.0F, 0.0F});
     CHECK(contact->penetration().metres() == Catch::Approx(2.0F));
 }
+
+TEST_CASE("discrete detector samples sphere-heightmap contacts in either order") {
+    const auto sphere = body(
+        1,
+        mgv::physics::Collider::sphere(mgv::physics::Length{0.5F}),
+        {0.5F, 0.25F, 0.5F});
+    const auto terrain = body(
+        2,
+        mgv::physics::Collider::heightmap(
+            2, 2, 1.0F, 1.0F, {0.0F, 0.0F, 0.0F, 0.0F}),
+        {});
+    const mgv::physics::DiscreteCollisionDetector detector;
+
+    const auto sphere_first = detector.detect(sphere, terrain);
+    const auto terrain_first = detector.detect(terrain, sphere);
+
+    REQUIRE(sphere_first.has_value());
+    REQUIRE(terrain_first.has_value());
+    CHECK(sphere_first->normal() == mgv::Vec3{0.0F, -1.0F, 0.0F});
+    CHECK(terrain_first->normal() == mgv::Vec3{0.0F, 1.0F, 0.0F});
+    CHECK(sphere_first->penetration().metres() == Catch::Approx(0.25F));
+    CHECK(terrain_first->penetration().metres() == Catch::Approx(0.25F));
+}

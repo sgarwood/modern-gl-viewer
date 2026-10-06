@@ -1,5 +1,6 @@
 #include "mgv/physics/collider.hpp"
 
+#include <cstddef>
 #include <stdexcept>
 #include <utility>
 
@@ -22,9 +23,19 @@ Collider Collider::box(Dimensions half_extents) {
     return Collider{BoxCollider{half_extents}};
 }
 
-Collider Collider::heightmap(int width, int depth, float scale_x, float scale_z, std::vector<float> heights) {
-    if (width <= 1 || depth <= 1 || scale_x <= 0.0F || scale_z <= 0.0F || heights.size() != static_cast<size_t>(width * depth)) {
+Collider Collider::heightmap(
+    int width,
+    int depth,
+    float scale_x,
+    float scale_z,
+    std::vector<float> heights) {
+    if (width <= 1 || depth <= 1 || scale_x <= 0.0F || scale_z <= 0.0F) {
         throw std::invalid_argument{"Invalid heightmap dimensions"};
+    }
+    const auto expected_size =
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(depth);
+    if (heights.size() != expected_size) {
+        throw std::invalid_argument{"Heightmap sample count does not match its dimensions"};
     }
     return Collider{HeightmapCollider{width, depth, scale_x, scale_z, std::move(heights)}};
 }
