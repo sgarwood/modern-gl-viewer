@@ -20,3 +20,7 @@
 ## 5. Manual QA & Evaluation
 *   Beyond automated tests, proactively verify the system behaves correctly in the real environment.
 *   Evaluate the effectiveness and performance of the solution before closing the task.
+
+## 6. QA & Self-Validation
+*   Never ask or instruct the user to "test it yourself".
+*   Always perform manual QA, verification, and self-validation of all features by actually executing the code and proving it works.

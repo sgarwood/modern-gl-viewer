@@ -125,7 +125,7 @@ public:
                 
                 // 2. Magnus Effect (Lift)
                 Vec3 omega = body.angular_velocity_.radians_per_second();
-                Vec3 lift_dir = cross(omega, v_air);
+                Vec3 lift_dir = cross(v_air, omega); // F = S * cross(v_fluid, omega) = S * cross(-v_air, omega) = S * cross(v_air, omega)
                 float lift_len = length(lift_dir);
                 
                 if (lift_len > 0.0F) {
