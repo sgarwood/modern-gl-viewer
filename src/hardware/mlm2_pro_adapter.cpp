@@ -28,7 +28,9 @@ void Mlm2ProAdapter::start() {
     if (is_running_.exchange(true)) return;
     
     listener_thread_ = std::jthread([this](std::stop_token stoken) {
-#ifndef _WIN32
+#ifdef _WIN32
+        static_cast<void>(stoken);
+#else
         int server_fd = socket(AF_INET, SOCK_STREAM, 0);
         if (server_fd == -1) return;
 

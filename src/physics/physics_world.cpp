@@ -161,8 +161,8 @@ public:
                 if (h < min_h) min_h = h;
                 if (h > max_h) max_h = h;
             }
-            float half_w = (hm.width * hm.scale_x) * 0.5f;
-            float half_d = (hm.depth * hm.scale_z) * 0.5f;
+            float half_w = (static_cast<float>(hm.width) * hm.scale_x) * 0.5f;
+            float half_d = (static_cast<float>(hm.depth) * hm.scale_z) * 0.5f;
             Vec3 min = subtract_v(pos, Vec3{half_w, -min_h, half_d});
             Vec3 max = add_v(pos, Vec3{half_w, max_h, half_d});
             
@@ -224,7 +224,7 @@ public:
                 
                 // 2. Magnus Effect (Lift)
                 Vec3 omega = body.angular_velocity_.radians_per_second();
-                Vec3 lift_dir = cross(v_air, omega); // F = S * cross(v_fluid, omega) = S * cross(-v_air, omega) = S * cross(v_air, omega)
+                Vec3 lift_dir = cross(omega, v_air);
                 float lift_len = length(lift_dir);
                 
                 if (lift_len > 0.0F) {

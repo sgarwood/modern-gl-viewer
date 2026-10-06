@@ -70,6 +70,9 @@ public:
         case InputAction::zoom_in:
         case InputAction::zoom_out:
         case InputAction::reset_view:
+        case InputAction::fire_test_shot:
+        case InputAction::toggle_range_finder:
+        case InputAction::range_finder_ping:
             break;
         }
 
