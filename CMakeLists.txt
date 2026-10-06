@@ -46,11 +46,25 @@ set(ozz_build_samples OFF CACHE BOOL "" FORCE)
 set(ozz_build_howtos OFF CACHE BOOL "" FORCE)
 set(ozz_build_tests OFF CACHE BOOL "" FORCE)
 set(ozz_build_postfix OFF CACHE BOOL "" FORCE)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+    set(mgv_ozz_exclude_from_all EXCLUDE_FROM_ALL)
+endif()
 FetchContent_Declare(ozz
     GIT_REPOSITORY https://github.com/guillaumeblanc/ozz-animation.git
     GIT_TAG 6cbdc790123aa4731d82e255df187b3a8a808256 # 0.16.0
+    ${mgv_ozz_exclude_from_all}
 )
-FetchContent_MakeAvailable(ozz)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+    FetchContent_MakeAvailable(ozz)
+else()
+    # FetchContent gained EXCLUDE_FROM_ALL in 3.28. Preserve the project's
+    # 3.24 minimum without allowing private Ozz install rules into packages.
+    FetchContent_GetProperties(ozz)
+    if(NOT ozz_POPULATED)
+        FetchContent_Populate(ozz)
+        add_subdirectory("${ozz_SOURCE_DIR}" "${ozz_BINARY_DIR}" EXCLUDE_FROM_ALL)
+    endif()
+endif()
 
 add_library(mgv_core
     src/bounds.cpp
@@ -382,6 +396,11 @@ if(MGV_INSTALL_TARGETS)
     install(DIRECTORY assets/
         DESTINATION ${CMAKE_INSTALL_DATADIR}/modern-gl-viewer/assets
     )
+    install(FILES "${ozz_SOURCE_DIR}/LICENSE.md"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/modern-gl-viewer
+        RENAME ozz-animation-LICENSE.md
+    )
+
     if(TARGET mgv_qml)
         if(Qt6_VERSION VERSION_LESS 6.5)
             # Qt 6.4 exposed this technology-preview output parameter under its

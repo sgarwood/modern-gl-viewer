@@ -30,6 +30,8 @@ types.
 - Dependency-inverted network I/O, bounded message queues, backpressure, and failure events.
 - Pimpl `Engine` runtime with stable `EntityId`/`RenderableId` handles and queued typed commands.
 - Injectable monotonic clock, physics-to-render bindings, and main-thread network-event decoding.
+- Ozz-backed animation clips and players with stable handles, deterministic playback commands,
+  and exclusive animation-to-render transform bindings.
 - Validated RGBA8 image data, linear/sRGB colour spaces, sampler descriptions, and RAII texture
   resources.
 - `MaterialInstance` keeps named texture bindings separate from immutable material pipelines.
@@ -48,6 +50,9 @@ The networking ownership, threading, and shutdown contracts are documented in
 
 Runtime orchestration, stable handles, tick ordering, and frontend boundaries are documented in
 [`docs/runtime.md`](docs/runtime.md).
+
+Animation archive loading, playback, transform ownership, and the current root-motion boundary are
+documented in [`docs/animation.md`](docs/animation.md).
 
 Cross-platform CircleCI builds and the manually triggered Debian/MSI prerelease process are
 documented in [`docs/releasing.md`](docs/releasing.md).
@@ -176,13 +181,15 @@ Scene -> Renderable -> Transform / MeshData / MaterialInstance --------> Rendere
                                       |-> Texture -> Image / Sampler
 Engine -> PhysicsWorld -> RigidBody / CollisionDetector
           |-> BodyId bound to EntityId/RenderableId -> Renderer transform update
+Engine -> AnimationSystem -> AnimationPlayerId -> EntityId/RenderableId transform update
 NetworkService -> NetworkEventSource -> NetworkEventDecoder -> queued EngineCommand
 ```
 
-The CMake targets mirror these boundaries: `mgv::core`, `mgv::physics`, `mgv::network`,
-`mgv::runtime`, `mgv::opengl`, `mgv::qt_frontend`, and the optional QML/Qt/GLFW entrypoints. A
-future Vulkan or Direct3D adapter can replace `mgv::opengl` without changing OBJ, camera,
-shader-file, networking, or scene orchestration code.
+The CMake targets mirror these boundaries: `mgv::core`, `mgv::animation`, `mgv::physics`,
+`mgv::network`, `mgv::runtime`, `mgv::opengl`, `mgv::qt_frontend`, and the optional QML/Qt/GLFW
+entrypoints. Ozz is private to `mgv::animation`; public engine and frontend headers expose no Ozz
+types. A future Vulkan or Direct3D adapter can replace `mgv::opengl` without changing OBJ, camera,
+animation, shader-file, networking, or scene orchestration code.
 
 `Scene` objects use shared immutable meshes, material pipelines, and textures. A `MaterialInstance`
 contains per-material named bindings without duplicating pipeline state. When a scene is submitted,

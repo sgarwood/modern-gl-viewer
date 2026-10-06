@@ -8,14 +8,16 @@ world.
 
 ## Stable identity
 
-`RenderableId`, `EntityId`, and `BodyId` are distinct value types so identifiers from different
-domains cannot be mixed accidentally.
+`RenderableId`, `EntityId`, `BodyId`, `AnimationClipId`, and `AnimationPlayerId` are distinct value
+types so identifiers from different domains cannot be mixed accidentally.
 
 - `Scene::add()` assigns a process-unique `RenderableId` and never reuses it.
 - Renderer updates and removal use `RenderableId`, not a vector offset.
 - `Engine` associates each loaded renderable with an `EntityId` that is never reused by that
   engine instance.
 - An entity can optionally bind one `BodyId`; removing the entity removes both bindings.
+- An entity can instead bind one `AnimationPlayerId`; physics and animation cannot both own the
+  same transform.
 - Stale or foreign handles are rejected rather than silently addressing a different object.
 
 Dense vectors remain an implementation detail for cache-friendly traversal. Erasing one object may
@@ -28,10 +30,11 @@ clock whose time advances explicitly. A tick executes in this order:
 
 1. Poll up to the per-tick network-event budget.
 2. Decode each event into typed `EngineCommand` values on the calling thread.
-3. Drain queued input, transform, and impulse commands.
-4. Advance `PhysicsWorld` using elapsed clock time and its fixed-step accumulator.
-5. Copy bound rigid-body positions into their entity transforms.
-6. Render once using total clock time and the supplied viewport.
+3. Drain queued input, transform, impulse, and animation playback commands.
+4. Advance animation players using elapsed clock time and copy their root poses to bound entities.
+5. Advance `PhysicsWorld` using elapsed clock time and its fixed-step accumulator.
+6. Copy bound rigid-body positions into their entity transforms.
+7. Render once using total clock time and the supplied viewport.
 
 Input callbacks only enqueue commands. State therefore changes at a tick boundary rather than
 inside a toolkit callback. `NetworkService` can continue owning socket I/O on its worker, while the

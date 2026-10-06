@@ -27,6 +27,7 @@ struct EntityRecord final {
     RenderableId renderable;
     Transform transform;
     std::optional<physics::BodyId> body;
+    std::optional<animation::AnimationPlayerId> animation_player;
 };
 
 constexpr std::size_t maximum_network_events_per_tick{1'024};
@@ -84,6 +85,7 @@ struct Engine::Impl final {
     [[nodiscard]] std::vector<EntityId> replace_entities(
         const std::vector<RenderableId>& renderables) {
         physics_world = physics::PhysicsWorld{physics_configuration};
+        animation_system.clear_players();
         commands.clear();
         entities.clear();
         entities.reserve(renderables.size());
@@ -96,6 +98,7 @@ struct Engine::Impl final {
                 .renderable = renderable,
                 .transform = renderer.renderable_transform(renderable),
                 .body = std::nullopt,
+                .animation_player = std::nullopt,
             });
             ids.push_back(entity);
         }
@@ -134,6 +137,17 @@ struct Engine::Impl final {
                         throw std::logic_error{"Cannot apply an impulse to an unbound entity"};
                     }
                     physics_world.apply_impulse(*entity.body, value.impulse);
+                } else if constexpr (std::is_same_v<Command, PlayAnimationCommand>) {
+                    animation_system.play(value.player);
+                } else if constexpr (std::is_same_v<Command, PauseAnimationCommand>) {
+                    animation_system.pause(value.player);
+                } else if constexpr (std::is_same_v<Command, StopAnimationCommand>) {
+                    animation_system.stop(value.player);
+                } else if constexpr (std::is_same_v<Command, SeekAnimationCommand>) {
+                    animation_system.seek(value.player, value.time);
+                } else if constexpr (
+                    std::is_same_v<Command, SetAnimationPlaybackRateCommand>) {
+                    animation_system.set_playback_rate(value.player, value.rate);
                 }
             },
             std::move(command));
@@ -157,10 +171,21 @@ struct Engine::Impl final {
         }
     }
 
+    void synchronize_animation() {
+        for (auto& entity : entities) {
+            if (!entity.animation_player) {
+                continue;
+            }
+            entity.transform = animation_system.root_transform(*entity.animation_player);
+            renderer.set_renderable_transform(entity.renderable, entity.transform);
+        }
+    }
+
     Renderer renderer;
     std::unique_ptr<Clock> clock;
     physics::PhysicsConfiguration physics_configuration;
     physics::PhysicsWorld physics_world;
+    animation::AnimationSystem animation_system;
     std::unique_ptr<InputSink> camera_input;
     std::deque<EngineCommand> commands;
     std::vector<EntityRecord> entities;
@@ -201,6 +226,9 @@ physics::BodyId Engine::bind_physics(
     EntityId entity,
     physics::RigidBodyDefinition body) {
     auto& record = impl_->find(entity);
+    if (record.animation_player) {
+        throw std::logic_error{"Cannot bind physics to an animated entity"};
+    }
     if (record.body) {
         throw std::logic_error{"Entity already has a physics body"};
     }
@@ -211,6 +239,28 @@ physics::BodyId Engine::bind_physics(
     return id;
 }
 
+animation::AnimationClipId Engine::load_animation(
+    const animation::AnimationAssetPaths& assets) {
+    return impl_->animation_system.load(assets);
+}
+
+animation::AnimationPlayerId Engine::bind_animation(
+    EntityId entity,
+    animation::AnimationClipId clip) {
+    auto& record = impl_->find(entity);
+    if (record.body) {
+        throw std::logic_error{"Cannot bind animation to a physics entity"};
+    }
+    if (record.animation_player) {
+        throw std::logic_error{"Entity already has an animation player"};
+    }
+    const auto player = impl_->animation_system.create_player(clip);
+    record.animation_player = player;
+    record.transform = impl_->animation_system.root_transform(player);
+    impl_->renderer.set_renderable_transform(record.renderable, record.transform);
+    return player;
+}
+
 void Engine::remove(EntityId entity) {
     const auto found = std::ranges::find(impl_->entities, entity, &EntityRecord::id);
     if (found == impl_->entities.end()) {
@@ -218,6 +268,9 @@ void Engine::remove(EntityId entity) {
     }
     if (found->body) {
         static_cast<void>(impl_->physics_world.remove_body(*found->body));
+    }
+    if (found->animation_player) {
+        static_cast<void>(impl_->animation_system.remove_player(*found->animation_player));
     }
     impl_->renderer.remove_renderable(found->renderable);
     impl_->entities.erase(found);
@@ -254,6 +307,8 @@ void Engine::tick(Viewport viewport) {
     }
     const auto elapsed = std::chrono::duration<float>{now - impl_->previous_tick}.count();
     impl_->previous_tick = now;
+    impl_->animation_system.advance(animation::AnimationDuration{elapsed});
+    impl_->synchronize_animation();
     impl_->physics_world.simulate(physics::Duration{elapsed});
     impl_->synchronize_physics();
 
@@ -272,6 +327,11 @@ bool Engine::contains(EntityId entity) const noexcept {
 
 Transform Engine::transform(EntityId entity) const {
     return impl_->find(entity).transform;
+}
+
+animation::PlaybackState Engine::animation_state(
+    animation::AnimationPlayerId player) const {
+    return impl_->animation_system.state(player);
 }
 
 Camera Engine::camera() const {

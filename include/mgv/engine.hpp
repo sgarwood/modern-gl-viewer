@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mgv/animation/animation_system.hpp"
 #include "mgv/input.hpp"
 #include "mgv/network/network_service.hpp"
 #include "mgv/physics/physics_world.hpp"
@@ -52,10 +53,37 @@ struct ApplyEntityImpulseCommand final {
     physics::Impulse impulse;
 };
 
+struct PlayAnimationCommand final {
+    animation::AnimationPlayerId player;
+};
+
+struct PauseAnimationCommand final {
+    animation::AnimationPlayerId player;
+};
+
+struct StopAnimationCommand final {
+    animation::AnimationPlayerId player;
+};
+
+struct SeekAnimationCommand final {
+    animation::AnimationPlayerId player;
+    animation::AnimationDuration time;
+};
+
+struct SetAnimationPlaybackRateCommand final {
+    animation::AnimationPlayerId player;
+    float rate{1.0F};
+};
+
 using EngineCommand = std::variant<
     CameraInputCommand,
     SetEntityTransformCommand,
-    ApplyEntityImpulseCommand>;
+    ApplyEntityImpulseCommand,
+    PlayAnimationCommand,
+    PauseAnimationCommand,
+    StopAnimationCommand,
+    SeekAnimationCommand,
+    SetAnimationPlaybackRateCommand>;
 
 class NetworkEventDecoder {
 public:
@@ -89,6 +117,11 @@ public:
     [[nodiscard]] physics::BodyId bind_physics(
         EntityId entity,
         physics::RigidBodyDefinition body);
+    [[nodiscard]] animation::AnimationClipId load_animation(
+        const animation::AnimationAssetPaths& assets);
+    [[nodiscard]] animation::AnimationPlayerId bind_animation(
+        EntityId entity,
+        animation::AnimationClipId clip);
     void remove(EntityId entity);
 
     void enqueue(EngineCommand command);
@@ -100,6 +133,8 @@ public:
 
     [[nodiscard]] bool contains(EntityId entity) const noexcept;
     [[nodiscard]] Transform transform(EntityId entity) const;
+    [[nodiscard]] animation::PlaybackState animation_state(
+        animation::AnimationPlayerId player) const;
     [[nodiscard]] Camera camera() const;
     [[nodiscard]] RenderStatistics last_frame_statistics() const noexcept;
 
