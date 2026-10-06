@@ -13,14 +13,16 @@ RigidBodyDefinition::RigidBodyDefinition(
     LinearVelocity velocity,
     AngularVelocity angular_velocity,
     Mass mass,
-    float restitution)
+    float restitution,
+    TerrainMaterial material)
     : motion_{motion},
       collider_{std::move(collider)},
       position_{position},
       velocity_{velocity},
       angular_velocity_{angular_velocity},
       mass_{mass},
-      restitution_{restitution} {}
+      restitution_{restitution},
+      material_{material} {}
 
 MotionType RigidBodyDefinition::motion() const noexcept { return motion_; }
 const Collider& RigidBodyDefinition::collider() const noexcept { return collider_; }
@@ -29,6 +31,7 @@ const LinearVelocity& RigidBodyDefinition::velocity() const noexcept { return ve
 const AngularVelocity& RigidBodyDefinition::angular_velocity() const noexcept { return angular_velocity_; }
 const Mass& RigidBodyDefinition::mass() const noexcept { return mass_; }
 float RigidBodyDefinition::restitution() const noexcept { return restitution_; }
+const TerrainMaterial& RigidBodyDefinition::material() const noexcept { return material_; }
 
 RigidBodyBuilder::RigidBodyBuilder(Collider collider) : collider_{std::move(collider)} {}
 
@@ -65,9 +68,14 @@ RigidBodyBuilder& RigidBodyBuilder::restitution(float value) {
     return *this;
 }
 
+RigidBodyBuilder& RigidBodyBuilder::material(TerrainMaterial value) {
+    material_ = value;
+    return *this;
+}
+
 RigidBodyDefinition RigidBodyBuilder::build() const {
     return RigidBodyDefinition{
-        motion_, collider_, position_, velocity_, angular_velocity_, mass_, restitution_};
+        motion_, collider_, position_, velocity_, angular_velocity_, mass_, restitution_, material_};
 }
 
 RigidBody::RigidBody(BodyId id, RigidBodyDefinition definition)
@@ -78,7 +86,8 @@ RigidBody::RigidBody(BodyId id, RigidBodyDefinition definition)
       velocity_{definition.velocity()},
       angular_velocity_{definition.angular_velocity()},
       mass_{definition.mass()},
-      restitution_{definition.restitution()} {}
+      restitution_{definition.restitution()},
+      material_{definition.material()} {}
 
 BodyId RigidBody::id() const noexcept { return id_; }
 MotionType RigidBody::motion() const noexcept { return motion_; }
@@ -93,5 +102,6 @@ float RigidBody::inverse_mass() const noexcept {
 }
 
 float RigidBody::restitution() const noexcept { return restitution_; }
+const TerrainMaterial& RigidBody::material() const noexcept { return material_; }
 
 } // namespace mgv::physics

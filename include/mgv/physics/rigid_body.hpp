@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mgv/physics/collider.hpp"
+#include "mgv/physics/terrain_material.hpp"
 
 #include <cstdint>
 
@@ -28,6 +29,7 @@ public:
     [[nodiscard]] const AngularVelocity& angular_velocity() const noexcept;
     [[nodiscard]] const Mass& mass() const noexcept;
     [[nodiscard]] float restitution() const noexcept;
+    [[nodiscard]] const TerrainMaterial& material() const noexcept;
 
 private:
     friend class RigidBodyBuilder;
@@ -39,7 +41,8 @@ private:
         LinearVelocity velocity,
         AngularVelocity angular_velocity,
         Mass mass,
-        float restitution);
+        float restitution,
+        TerrainMaterial material);
 
     MotionType motion_;
     Collider collider_;
@@ -48,6 +51,7 @@ private:
     AngularVelocity angular_velocity_;
     Mass mass_;
     float restitution_{};
+    TerrainMaterial material_{};
 };
 
 class RigidBodyBuilder final {
@@ -60,6 +64,7 @@ public:
     RigidBodyBuilder& angular_velocity(AngularVelocity value) noexcept;
     RigidBodyBuilder& mass(Mass value) noexcept;
     RigidBodyBuilder& restitution(float value);
+    RigidBodyBuilder& material(TerrainMaterial value);
 
     [[nodiscard]] RigidBodyDefinition build() const;
 
@@ -71,6 +76,7 @@ private:
     AngularVelocity angular_velocity_;
     Mass mass_{1.0F};
     float restitution_{};
+    TerrainMaterial material_{};
 };
 
 class RigidBody final {
@@ -86,6 +92,7 @@ public:
     [[nodiscard]] const Mass& mass() const noexcept;
     [[nodiscard]] float inverse_mass() const noexcept;
     [[nodiscard]] float restitution() const noexcept;
+    [[nodiscard]] const TerrainMaterial& material() const noexcept;
 
 private:
     friend class PhysicsWorldImpl;
@@ -98,6 +105,7 @@ private:
     AngularVelocity angular_velocity_;
     Mass mass_;
     float restitution_{};
+    TerrainMaterial material_{};
 };
 
 } // namespace mgv::physics

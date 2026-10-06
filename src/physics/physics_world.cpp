@@ -163,17 +163,63 @@ public:
             second.velocity_.metres_per_second(),
             first.velocity_.metres_per_second());
         const auto separating_velocity = dot(relative_velocity, contact.normal());
-        if (separating_velocity >= 0.0F) {
-            return;
+        
+        // Normal impulse (bouncing)
+        if (separating_velocity < 0.0F) {
+            const auto restitution = std::min(first.restitution_, second.restitution_);
+            // If hitting sand heavily, plug the ball (drop restitution to 0)
+            float final_restitution = restitution;
+            if (first.material().surface == TerrainSurface::Sand || second.material().surface == TerrainSurface::Sand) {
+                if (separating_velocity < -5.0F) final_restitution = 0.0F;
+            }
+            
+            const auto impulse_magnitude =
+                -(1.0F + final_restitution) * separating_velocity / total_inverse_mass;
+            const auto impulse = scaled(contact.normal(), impulse_magnitude);
+            first.velocity_ = LinearVelocity{subtract(
+                first.velocity_.metres_per_second(), scaled(impulse, first_inverse_mass))};
+            second.velocity_ = LinearVelocity{add(
+                second.velocity_.metres_per_second(), scaled(impulse, second_inverse_mass))};
         }
-        const auto restitution = std::min(first.restitution_, second.restitution_);
-        const auto impulse_magnitude =
-            -(1.0F + restitution) * separating_velocity / total_inverse_mass;
-        const auto impulse = scaled(contact.normal(), impulse_magnitude);
-        first.velocity_ = LinearVelocity{subtract(
-            first.velocity_.metres_per_second(), scaled(impulse, first_inverse_mass))};
-        second.velocity_ = LinearVelocity{add(
-            second.velocity_.metres_per_second(), scaled(impulse, second_inverse_mass))};
+        
+        // Friction and Rolling Resistance (Tangential)
+        // Recalculate relative velocity after normal impulse
+        const auto new_relative_velocity = subtract(
+            second.velocity_.metres_per_second(),
+            first.velocity_.metres_per_second());
+        const auto v_normal = dot(new_relative_velocity, contact.normal());
+        const auto v_tangent = subtract(new_relative_velocity, scaled(contact.normal(), v_normal));
+        const float v_tangent_len = length(v_tangent);
+        
+        if (v_tangent_len > 0.001F) {
+            Vec3 tangent_dir = scaled(v_tangent, 1.0F / v_tangent_len);
+            
+            // Average dynamic friction
+            float mu = (first.material().dynamic_friction + second.material().dynamic_friction) * 0.5F;
+            
+            // Rolling resistance modifier
+            float rolling_res = std::max(first.material().rolling_resistance, second.material().rolling_resistance);
+            float sand_mod = std::max(first.material().sand_topdressing, second.material().sand_topdressing);
+            mu += rolling_res + (sand_mod * 0.2F);
+            
+            // Bumpiness (Bobbles) adds micro-deflections to the tangent
+            float bumpiness = std::max(first.material().bumpiness, second.material().bumpiness);
+            if (bumpiness > 0.0F) {
+                // Slower putts are deflected more severely relative to their velocity
+                float deflection_mag = bumpiness * 0.05F / (v_tangent_len + 0.1F);
+                // Pseudo-random deflection based on position (deterministic)
+                float noise_z = std::sin(first.position_.metres().x * 100.0F) * deflection_mag;
+                tangent_dir = add(tangent_dir, {0.0F, 0.0F, noise_z});
+            }
+            
+            float friction_impulse_mag = std::min(v_tangent_len / total_inverse_mass, mu * 9.81F * 0.016F);
+            const auto friction_impulse = scaled(tangent_dir, friction_impulse_mag);
+            
+            first.velocity_ = LinearVelocity{subtract(
+                first.velocity_.metres_per_second(), scaled(friction_impulse, first_inverse_mass))};
+            second.velocity_ = LinearVelocity{add(
+                second.velocity_.metres_per_second(), scaled(friction_impulse, second_inverse_mass))};
+        }
     }
 
     void step(float time_step) {
