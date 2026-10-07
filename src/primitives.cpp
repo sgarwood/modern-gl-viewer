@@ -516,4 +516,112 @@ MeshData make_tree(const TreeDescription& description) {
     return mesh;
 }
 
+
+MeshData make_grass_blade(int segments) {
+    if (segments < 1) {
+        throw std::invalid_argument{"A grass blade needs at least one segment"};
+    }
+
+    MeshData mesh;
+    // Pairs of vertices up the blade, closing to a single vertex at the tip.
+    for (int row = 0; row < segments; ++row) {
+        const auto v = static_cast<float>(row) / static_cast<float>(segments);
+        // The blade narrows towards the tip, quickly at first.
+        const auto half_width = 0.5F * (1.0F - v * v * 0.55F - v * 0.35F);
+        for (const auto side : {-1.0F, 1.0F}) {
+            mesh.vertices.push_back({
+                .position = {side * half_width, v, 0.0F},
+                .normal = {0.0F, 0.0F, 1.0F},
+                .tex_coord = {side * 0.5F + 0.5F, v},
+            });
+        }
+    }
+    mesh.vertices.push_back({
+        .position = {0.0F, 1.0F, 0.0F},
+        .normal = {0.0F, 0.0F, 1.0F},
+        .tex_coord = {0.5F, 1.0F},
+    });
+
+    for (int row = 0; row + 1 < segments; ++row) {
+        const auto base = static_cast<std::uint32_t>(row) * 2;
+        mesh.indices.insert(mesh.indices.end(), {
+            base, base + 1, base + 2,
+            base + 2, base + 1, base + 3,
+        });
+    }
+    const auto last = static_cast<std::uint32_t>(segments - 1) * 2;
+    const auto tip = static_cast<std::uint32_t>(mesh.vertices.size() - 1);
+    mesh.indices.insert(mesh.indices.end(), {last, last + 1, tip});
+    return mesh;
+}
+
+MeshData make_grass_field(
+    const GrassFieldDescription& field,
+    const CourseTerrainDescription& terrain) {
+    if (!(field.radius > 0.0F)) {
+        throw std::invalid_argument{"A grass field needs a positive radius"};
+    }
+    if (!(field.density > 0.0F)) {
+        throw std::invalid_argument{"A grass field needs a positive density"};
+    }
+
+    auto mesh = make_grass_blade(field.segments);
+
+    Rng rng{field.seed};
+    const auto area = pi * field.radius * field.radius;
+    const auto attempts = static_cast<int>(area * field.density);
+    mesh.instances.reserve(static_cast<std::size_t>(attempts));
+
+    for (int attempt = 0; attempt < attempts; ++attempt) {
+        // Uniform over the disc: the square root keeps the scatter from
+        // bunching at the centre, which a naive radius would.
+        const auto angle = rng.next(0.0F, 2.0F * pi);
+        const auto distance = field.radius * std::sqrt(rng.next(0.0F, 1.0F));
+        const auto x = field.centre.x + std::cos(angle) * distance;
+        const auto z = field.centre.y + std::sin(angle) * distance;
+
+        const auto surface = course_surface_class(x, z, terrain);
+        if (surface.cut_height < field.minimum_cut) {
+            continue;
+        }
+
+        // Thin the scatter where the grass is shorter, rather than carpeting
+        // a fairway with blades nobody can resolve, and thin it again towards
+        // the rim. Without the second, the field ends in a visible ring where
+        // blades stop and only the turf surface remains.
+        const auto rim = smoothstep_between(0.70F, 1.0F, distance / field.radius);
+        // A fairway still wants a full mat of blades; they are simply much
+        // shorter. Thinning in proportion to the cut would leave it bare.
+        const auto keep = std::clamp(surface.cut_height / 0.022F, 0.25F, 1.0F) * (1.0F - rim);
+        if (rng.next(0.0F, 1.0F) > keep) {
+            continue;
+        }
+
+        // Blades stand a little above the height of cut and vary widely; a
+        // uniform lawn of identical blades reads as carpet. They also shorten
+        // into the rim, so the field thins in height as well as in number.
+        const auto height =
+            surface.cut_height * rng.next(0.80F, 1.55F) * (1.0F - rim * 0.55F);
+        const auto width = std::clamp(height * 0.085F, 0.0012F, 0.006F);
+        mesh.instances.push_back({
+            .position = {x, course_terrain_height(x, z, terrain), z},
+            .yaw = rng.next(0.0F, 2.0F * pi),
+            .parameters = {
+                height,
+                width,
+                rng.next(0.0F, 1.0F),
+                // Longer grass flops further; a mown blade stands up.
+                rng.next(0.10F, 0.55F) * std::clamp(surface.cut_height / 0.06F, 0.25F, 1.0F),
+            },
+        });
+    }
+
+    if (mesh.instances.empty()) {
+        // An empty instance list would be drawn once at the origin. Nothing
+        // grew here, so give the caller nothing to draw.
+        mesh.instances.push_back({.parameters = {0.0F, 0.0F, 0.0F, 0.0F}});
+    }
+    return mesh;
+}
+
 } // namespace mgv

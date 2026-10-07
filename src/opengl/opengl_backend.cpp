@@ -255,11 +255,39 @@ public:
         glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, normal)));
         glEnableVertexAttribArray(2);
         glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, tex_coord)));
+
+        // Every mesh carries an instance buffer, even an ordinary one, whose
+        // single entry is the identity placement. That way one depth program
+        // and one vertex layout serve both cases, instead of needing an
+        // instanced variant of each.
+        static_assert(std::is_standard_layout_v<MeshInstance>);
+        static constexpr MeshInstance identity_instance{};
+        const auto* instance_data =
+            mesh.instances.empty() ? &identity_instance : mesh.instances.data();
+        const auto instances = mesh.instance_count();
+        instance_count_ = checked_count(instances);
+        glBindBuffer(GL_ARRAY_BUFFER, instance_buffer_.get());
+        glBufferData(
+            GL_ARRAY_BUFFER,
+            static_cast<GLsizeiptr>(instances * sizeof(MeshInstance)),
+            instance_data,
+            GL_STATIC_DRAW);
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(
+            3, 4, GL_FLOAT, GL_FALSE, sizeof(MeshInstance),
+            reinterpret_cast<void*>(offsetof(MeshInstance, position)));
+        glVertexAttribDivisor(3, 1);
+        glEnableVertexAttribArray(4);
+        glVertexAttribPointer(
+            4, 4, GL_FLOAT, GL_FALSE, sizeof(MeshInstance),
+            reinterpret_cast<void*>(offsetof(MeshInstance, parameters)));
+        glVertexAttribDivisor(4, 1);
         glBindVertexArray(0);
     }
 
     [[nodiscard]] GLuint vertex_array() const noexcept { return vertex_array_.get(); }
     [[nodiscard]] GLsizei index_count() const noexcept { return index_count_; }
+    [[nodiscard]] GLsizei instance_count() const noexcept { return instance_count_; }
 
 private:
     [[nodiscard]] static GLsizei checked_count(std::size_t count) {
@@ -272,7 +300,9 @@ private:
     VertexArray vertex_array_;
     Buffer vertex_buffer_;
     Buffer index_buffer_;
+    Buffer instance_buffer_;
     GLsizei index_count_{};
+    GLsizei instance_count_{1};
 };
 
 [[nodiscard]] GLenum primitive_topology(PrimitiveTopology topology) {
@@ -621,9 +651,18 @@ constexpr GLsizei shadow_map_resolution = 2048;
 
 constexpr std::string_view depth_vertex_source = R"(#version 410 core
 layout(location = 0) in vec3 aPosition;
+layout(location = 3) in vec4 aInstancePosition;   // xyz offset, w yaw
+layout(location = 4) in vec4 aInstanceParameters; // x scale
 uniform mat4 uMvp;
 void main() {
-    gl_Position = uMvp * vec4(aPosition, 1.0);
+    float sine = sin(aInstancePosition.w);
+    float cosine = cos(aInstancePosition.w);
+    vec3 local = aPosition * max(aInstanceParameters.x, 1e-4);
+    vec3 placed = vec3(
+        local.x * cosine + local.z * sine,
+        local.y,
+        -local.x * sine + local.z * cosine) + aInstancePosition.xyz;
+    gl_Position = uMvp * vec4(placed, 1.0);
 }
 )";
 
@@ -713,7 +752,8 @@ public:
             glUniformMatrix4fv(mvp_location_, 1, GL_FALSE, model_view_projection.data());
         }
         glBindVertexArray(mesh.vertex_array());
-        glDrawElements(GL_TRIANGLES, mesh.index_count(), GL_UNSIGNED_INT, nullptr);
+        glDrawElementsInstanced(
+            GL_TRIANGLES, mesh.index_count(), GL_UNSIGNED_INT, nullptr, mesh.instance_count());
         glBindVertexArray(0);
     }
 
@@ -1111,11 +1151,12 @@ public:
             }
         }
         glBindVertexArray(gl_mesh.vertex_array());
-        glDrawElements(
+        glDrawElementsInstanced(
             primitive_topology(pipeline.topology()),
             gl_mesh.index_count(),
             GL_UNSIGNED_INT,
-            nullptr);
+            nullptr,
+            gl_mesh.instance_count());
         glBindVertexArray(0);
         for (std::size_t index = 0; index < packet.textures.size(); ++index) {
             glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(index));

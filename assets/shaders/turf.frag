@@ -103,8 +103,9 @@ void main() {
     const vec3 kRoughAlbedo = vec3(0.043, 0.082, 0.038);
     vec3 albedo = mix(kShavedAlbedo, kRoughAlbedo, shag);
 
-    // Patchiness scales with the cut for the same reason.
-    albedo *= mix(1.0, mix(0.70, 1.34, clump), shag);
+    // Patchiness scales with the cut, and steeply: a mown surface that
+    // mottles at close range reads as mud rather than as grass.
+    albedo *= mix(1.0, mix(0.70, 1.34, clump), shag * shag);
 
     // Wet turf is darker and glossier; water fills the gaps between blades.
     float wetness = clamp(uSurfaceWetness, 0.0, 1.0) * (1.0 - trail_dryness());
@@ -143,7 +144,7 @@ void main() {
     // The dominant cue. Blades shade each other, and deep rough is mostly
     // shadow between stems: this is why rough looks dark from any angle and
     // in any light, where a tint only works under one.
-    surface.occlusion = mix(0.95, 0.34, shag) * mix(1.0, mix(0.72, 1.0, clump), shag);
+    surface.occlusion = mix(0.95, 0.34, shag) * mix(1.0, mix(0.72, 1.0, clump), shag * shag);
 
     vec3 sun = normalize(uSunDirection);
     float visibility = sun_visibility(vWorldPosition, geometric_normal, sun, 2.6);

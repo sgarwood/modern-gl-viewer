@@ -47,9 +47,29 @@ struct CourseAssets final {
     std::filesystem::path shader_directory;
 };
 
+/// The region of the course the ball can actually collide with.
+///
+/// The drawn terrain runs to the horizon, but a heightmap fine enough to putt
+/// on cannot cover that much ground. The collider covers the corridor of
+/// play; anything hit far outside it lands on a backstop well below.
+struct CourseCollisionDescription final {
+    Vec2 minimum{-70.0F, -230.0F};
+    Vec2 maximum{70.0F, 40.0F};
+    /// Spacing between samples, in metres. The green's undulation has a
+    /// wavelength of about sixteen metres, so this resolves it to well under
+    /// a millimetre after interpolation.
+    float resolution{0.25F};
+    /// Height of the backstop that catches anything leaving the heightmap.
+    float backstop_height{-12.0F};
+};
+
 struct CourseSessionDescription final {
     CourseAssets assets;
     CourseTerrainDescription terrain;
+    CourseCollisionDescription collision;
+    /// Near-field grass. Its centre defaults to the ball, which is where the
+    /// player's attention is and where blades are large enough to see.
+    GrassFieldDescription grass;
     CourseViewpoint viewpoint;
     Environment environment;
     /// Where the ball is teed or lying, in the ground plane. Its height comes

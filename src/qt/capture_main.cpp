@@ -7,6 +7,7 @@
 #include "mgv/course_session.hpp"
 #include "mgv/engine.hpp"
 #include "mgv/opengl_backend.hpp"
+#include "mgv/primitives.hpp"
 #include "mgv/runtime_paths.hpp"
 
 #include <QByteArray>
@@ -99,6 +100,14 @@ int main(int argc, char** argv) {
         "wetness", "Surface wetness, 0 to 1.", "fraction"};
     const QCommandLineOption turbidity_option{
         "turbidity", "Atmospheric turbidity, 1.7 to 10.", "value"};
+    const QCommandLineOption grass_option{
+        "grass", "Blades per square metre of rough; 0 disables.", "density"};
+    const QCommandLineOption grass_radius_option{
+        "grass-radius", "How far the blade field extends, in metres.", "metres"};
+    const QCommandLineOption wind_option{
+        "wind", "Wind speed in metres per second.", "mps"};
+    const QCommandLineOption ball_option{
+        "ball", "Where the ball lies, \"x,0,z\" in the ground plane.", "vec3"};
     const QCommandLineOption camera_option{"camera", "Camera ground position and eye height, \"x,height,z\".", "vec3"};
     const QCommandLineOption target_option{"target", "Look-at ground position and height, \"x,height,z\".", "vec3"};
     const QCommandLineOption fov_option{"fov", "Vertical field of view, degrees.", "degrees"};
@@ -115,6 +124,10 @@ int main(int argc, char** argv) {
                                shader_dir_option,
                                wetness_option,
                                turbidity_option,
+                               grass_option,
+                               grass_radius_option,
+                               wind_option,
+                               ball_option,
                                camera_option,
                                target_option,
                                fov_option,
@@ -216,11 +229,38 @@ int main(int argc, char** argv) {
         if (parser.isSet(turbidity_option)) {
             description.environment.turbidity = parser.value(turbidity_option).toFloat();
         }
+        if (parser.isSet(ball_option)) {
+            const auto lie = parse_vec3(parser.value(ball_option));
+            if (!lie) {
+                std::fprintf(stderr, "--ball expects \"x,0,z\".\n");
+                return 2;
+            }
+            description.ball_start = {lie->x, lie->z};
+        }
+        if (parser.isSet(grass_option)) {
+            description.grass.density = parser.value(grass_option).toFloat();
+        }
+        if (parser.isSet(grass_radius_option)) {
+            description.grass.radius = parser.value(grass_radius_option).toFloat();
+        }
+        if (parser.isSet(wind_option)) {
+            description.environment.wind_speed = parser.value(wind_option).toFloat();
+        }
 
-        static_cast<void>(mgv::configure_course_session(*engine, description));
+        const auto ball = mgv::configure_course_session(*engine, description);
         for (int frame = 0; frame < frames; ++frame) {
             engine->tick({width, height});
         }
+
+        // Where the ball actually came to rest, which is the quickest way to
+        // see that it is resting on the terrain rather than falling past it.
+        const auto lie = engine->transform(ball).position();
+        std::printf(
+            "ball=(%.3f, %.3f, %.3f) terrain=%.3f\n",
+            static_cast<double>(lie.x),
+            static_cast<double>(lie.y),
+            static_cast<double>(lie.z),
+            static_cast<double>(mgv::course_terrain_height(lie.x, lie.z, description.terrain)));
 
         const auto statistics = engine->last_frame_statistics();
         std::printf(

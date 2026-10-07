@@ -106,6 +106,40 @@ struct TreeDescription final {
 
 [[nodiscard]] MeshData make_tree(const TreeDescription& description);
 
+/// Builds a single grass blade of unit height, standing on the origin.
+///
+/// The blade is a tapered strip narrowing to a point. It is deliberately
+/// featureless: its height, width, lean, and colour all arrive as instance
+/// parameters, and its curve is applied in the vertex shader, so one mesh
+/// serves every blade on the course.
+[[nodiscard]] MeshData make_grass_blade(int segments);
+
+/// How a field of individual blades is scattered.
+struct GrassFieldDescription final {
+    /// Centre of the field, in the ground plane.
+    Vec2 centre{};
+    /// How far the field extends from its centre, in metres.
+    float radius{9.0F};
+    /// Blades per square metre on fully grown rough. Shorter cuts get
+    /// proportionally fewer, because there is less of them to see.
+    float density{320.0F};
+    /// Blades shorter than this are not worth an instance: at a putting
+    /// green's three millimetres they are below a pixel from any stance.
+    float minimum_cut{0.008F};
+    int segments{4};
+    unsigned int seed{9'001u};
+};
+
+/// Scatters blades across the terrain, taking each one's height, width, and
+/// lean from the height of cut where it stands.
+///
+/// This is near-field detail. Beyond a few metres a blade is smaller than a
+/// pixel and the turf shader's filtered surface takes over, which is why the
+/// field is bounded rather than covering the hole.
+[[nodiscard]] MeshData make_grass_field(
+    const GrassFieldDescription& field,
+    const CourseTerrainDescription& terrain);
+
 /// Builds a flat, subdivided square in the XZ plane, centred on the origin and
 /// facing +Y. Subdivision exists so that per-vertex work and large triangles
 /// do not interpolate badly across the ground.

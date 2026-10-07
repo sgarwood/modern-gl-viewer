@@ -5,6 +5,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <stdexcept>
 
 namespace {
@@ -62,4 +63,72 @@ TEST_CASE("frustum tests spheres for both portable clip-depth conventions") {
         CHECK_FALSE(frustum->intersects({.center = {100.0F, 0.0F, 0.0F}, .radius = 0.5F}));
         CHECK_FALSE(frustum->intersects({.center = {0.0F, 0.0F, 4.0F}, .radius = 0.25F}));
     }
+}
+
+TEST_CASE("bounds of an instanced mesh enclose every placement") {
+    mgv::MeshData mesh{
+        .vertices = {{{-0.5F, 0.0F, 0.0F}, {0, 0, 1}, {0, 0}},
+                     {{0.5F, 0.0F, 0.0F}, {0, 0, 1}, {1, 0}},
+                     {{0.0F, 1.0F, 0.0F}, {0, 0, 1}, {0, 1}}},
+        .indices = {0, 1, 2},
+    };
+    mesh.instances = {
+        {.position = {10.0F, 0.0F, 0.0F}},
+        {.position = {-10.0F, 0.0F, 0.0F}},
+        {.position = {0.0F, 0.0F, 25.0F}},
+    };
+
+    const auto bounds = mgv::calculate_bounds(mesh);
+
+    SECTION("the box spans the placements, not just the source geometry") {
+        CHECK(bounds.box.minimum.x <= -10.5F);
+        CHECK(bounds.box.maximum.x >= 10.5F);
+        CHECK(bounds.box.maximum.z >= 25.0F);
+    }
+    SECTION("the sphere contains every placed vertex") {
+        for (const auto& instance : mesh.instances) {
+            for (const auto& vertex : mesh.vertices) {
+                const mgv::Vec3 placed{
+                    vertex.position.x + instance.position.x,
+                    vertex.position.y + instance.position.y,
+                    vertex.position.z + instance.position.z,
+                };
+                const auto dx = placed.x - bounds.sphere.center.x;
+                const auto dy = placed.y - bounds.sphere.center.y;
+                const auto dz = placed.z - bounds.sphere.center.z;
+                CHECK(std::sqrt(dx * dx + dy * dy + dz * dz) <= bounds.sphere.radius + 1.0e-4F);
+            }
+        }
+    }
+}
+
+TEST_CASE("instance scale and yaw widen the bounds") {
+    mgv::MeshData mesh{
+        .vertices = {{{0.0F, 0.0F, 0.0F}, {0, 1, 0}, {0, 0}},
+                     {{2.0F, 0.0F, 0.0F}, {0, 1, 0}, {1, 0}},
+                     {{0.0F, 0.0F, 0.1F}, {0, 1, 0}, {0, 1}}},
+        .indices = {0, 1, 2},
+    };
+    const auto unplaced = mgv::calculate_bounds(mesh);
+
+    // A quarter turn swings the long axis onto Z, and the scale triples it.
+    mesh.instances = {{.position = {}, .yaw = 1.5707963F, .parameters = {3.0F, 0, 0, 0}}};
+    const auto placed = mgv::calculate_bounds(mesh);
+
+    CHECK(placed.sphere.radius > unplaced.sphere.radius * 2.5F);
+    CHECK(std::abs(placed.box.minimum.z) + std::abs(placed.box.maximum.z) > 5.0F);
+}
+
+TEST_CASE("an uninstanced mesh keeps the bounds it always had") {
+    const mgv::MeshData mesh{
+        .vertices = {{{-1.0F, 0.0F, 0.0F}, {0, 0, 1}, {0, 0}},
+                     {{1.0F, 0.0F, 0.0F}, {0, 0, 1}, {1, 0}},
+                     {{0.0F, 2.0F, 0.0F}, {0, 0, 1}, {0, 1}}},
+        .indices = {0, 1, 2},
+    };
+
+    const auto bounds = mgv::calculate_bounds(mesh);
+
+    CHECK(bounds.box.minimum.x == -1.0F);
+    CHECK(bounds.box.maximum.y == 2.0F);
 }

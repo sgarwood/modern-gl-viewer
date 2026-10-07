@@ -80,6 +80,35 @@ still name the right file. Circular includes are rejected.
 - `lib/fog.glsl` — closed-form height-falloff aerial perspective
 - `lib/color.glsl`, `lib/noise.glsl`
 
+## Instancing
+
+`MeshData::instances` carries placements of a mesh as per-instance vertex
+attributes: a world offset and yaw at location 3, and four free parameters at
+location 4. Every mesh has an instance buffer, including an ordinary one,
+whose single entry is the identity placement; that way one depth program and
+one vertex layout serve both cases.
+
+Bounds cover every placement. Without that a field of grass is culled on the
+strength of one blade sitting at the origin.
+
+## Grass
+
+Individual blades are drawn only near the player. Beyond a few metres a blade
+is smaller than a pixel, and the turf shader's filtered surface is both
+cheaper and steadier.
+
+One unit-height blade mesh serves the whole course; height, width, lean, and
+colour all arrive as instance parameters, taken from the height of cut where
+each blade stands. A putting green grows none worth drawing. The field thins
+in number and in height towards its rim, or it ends in a visible ring.
+
+Blades do not cast into the shadow map: a hundred thousand of them would spend
+the whole map on detail finer than one of its texels.
+
+The field is static and centred on the ball. Patches that follow the camera,
+regenerated as the player walks, are the next step and are what this needs to
+become before the hike is playable.
+
 ## Filtering
 
 Surface detail is faded against the screen-space pixel footprint, taken from
@@ -119,10 +148,16 @@ QT_QPA_PLATFORM=wayland ./build/wsl-qt/mgv_capture --out shot.png \
   --width 1100 --height 620 --sun-azimuth 42 --sun-elevation 15 --exposure 13.2
 ```
 
-`--exposure` takes an EV100 value. `--turbidity`, `--wetness`, `--camera`,
-`--target`, `--fov`, `--frames`, and `--shaders` are also available; the last
-points at an alternative shader directory, which is how a debug variant of a
-surface shader is rendered without disturbing the real one.
+`--exposure` takes an EV100 value. `--camera` and `--target` take a ground
+position and a height above terrain, as `x,height,z`. Also available:
+`--turbidity`, `--wetness`, `--wind`, `--fov`, `--frames`, `--ball`,
+`--grass`, `--grass-radius`, and `--shaders`. The last points at an
+alternative shader directory, which is how a debug variant of a surface
+shader is rendered without disturbing the real one.
+
+Each run reports the draw statistics and where the ball came to rest against
+the terrain height beneath it, which is the quickest way to see that it is
+resting on the ground rather than falling past it.
 
 ## Hardware note
 

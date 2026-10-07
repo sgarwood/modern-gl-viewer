@@ -228,3 +228,111 @@ TEST_CASE("course terrain construction rejects degenerate descriptions") {
     no_rings.rings = 0;
     CHECK_THROWS(mgv::make_course_terrain(no_rings));
 }
+
+TEST_CASE("a grass blade tapers to a single vertex at its tip") {
+    const auto blade = mgv::make_grass_blade(4);
+
+    REQUIRE_FALSE(blade.empty());
+    CHECK(blade.vertices.size() == 9);   // four pairs plus the tip
+    CHECK(blade.indices.size() == 3 * 7);
+
+    const auto& tip = blade.vertices.back();
+    CHECK(tip.position.x == 0.0F);
+    CHECK(tip.position.y == Catch::Approx(1.0F));
+
+    SECTION("the blade is of unit height, so instance scale is its length") {
+        auto tallest = 0.0F;
+        for (const auto& vertex : blade.vertices) {
+            tallest = std::max(tallest, vertex.position.y);
+            CHECK(vertex.position.y >= 0.0F);
+        }
+        CHECK(tallest == Catch::Approx(1.0F));
+    }
+    SECTION("it narrows from base to tip") {
+        CHECK(std::abs(blade.vertices[0].position.x) >
+              std::abs(blade.vertices[6].position.x));
+    }
+}
+
+TEST_CASE("a grass blade rejects a degenerate segment count") {
+    CHECK_THROWS(mgv::make_grass_blade(0));
+}
+
+TEST_CASE("a grass field takes each blade from the cut where it stands") {
+    const mgv::CourseTerrainDescription terrain;
+    mgv::GrassFieldDescription field;
+    field.centre = {40.0F, -60.0F};   // deep in the rough, beside the approach
+    field.radius = 6.0F;
+    field.density = 120.0F;
+
+    const auto grass = mgv::make_grass_field(field, terrain);
+
+    REQUIRE(grass.instances.size() > 50);
+    for (const auto& instance : grass.instances) {
+        const auto height = instance.parameters.x;
+        const auto width = instance.parameters.y;
+        CHECK(height > 0.0F);
+        CHECK(height < 0.12F);
+        CHECK(width > 0.0F);
+        CHECK(width < height);
+
+        SECTION("every blade stands on the terrain") {
+            CHECK(instance.position.y == Catch::Approx(mgv::course_terrain_height(
+                      instance.position.x, instance.position.z, terrain)).margin(1.0e-4F));
+        }
+        SECTION("and inside the field") {
+            const auto dx = instance.position.x - field.centre.x;
+            const auto dz = instance.position.z - field.centre.y;
+            CHECK(std::sqrt(dx * dx + dz * dz) <= field.radius + 1.0e-3F);
+        }
+    }
+}
+
+TEST_CASE("rough grows taller blades than a fairway does") {
+    const mgv::CourseTerrainDescription terrain;
+    const auto average_height = [&terrain](mgv::Vec2 centre) {
+        mgv::GrassFieldDescription field;
+        field.centre = centre;
+        field.radius = 4.0F;
+        field.density = 300.0F;
+        const auto grass = mgv::make_grass_field(field, terrain);
+        auto total = 0.0F;
+        for (const auto& instance : grass.instances) {
+            total += instance.parameters.x;
+        }
+        return total / static_cast<float>(grass.instances.size());
+    };
+
+    const auto fairway = average_height({0.0F, -60.0F});
+    const auto rough = average_height({45.0F, -60.0F});
+
+    CHECK(rough > fairway * 3.0F);
+}
+
+TEST_CASE("a putting surface grows no blades worth drawing") {
+    const mgv::CourseTerrainDescription terrain;
+    mgv::GrassFieldDescription field;
+    field.centre = {0.0F, 0.0F};
+    field.radius = 3.0F;
+    field.density = 400.0F;
+
+    const auto grass = mgv::make_grass_field(field, terrain);
+
+    // Three millimetres of bentgrass is below a pixel from any stance, so the
+    // field degenerates to the single placeholder instance.
+    REQUIRE(grass.instances.size() == 1);
+    CHECK(grass.instances.front().parameters.x == 0.0F);
+}
+
+TEST_CASE("a grass field rejects a degenerate description") {
+    const mgv::CourseTerrainDescription terrain;
+    mgv::GrassFieldDescription field;
+
+    auto no_radius = field;
+    no_radius.radius = 0.0F;
+    CHECK_THROWS(mgv::make_grass_field(no_radius, terrain));
+
+    auto no_density = field;
+    no_density.density = 0.0F;
+    CHECK_THROWS(mgv::make_grass_field(no_density, terrain));
+}

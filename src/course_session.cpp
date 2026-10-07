@@ -2,6 +2,7 @@
 
 #include "mgv/obj_loader.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <vector>
 #include "mgv/primitives.hpp"
@@ -195,6 +196,28 @@ EntityId configure_course_session(Engine& engine, const CourseSessionDescription
         ++placement;
     }
 
+    // --- near-field grass ---------------------------------------------------
+    // Individual blades are only worth drawing within a few metres; beyond
+    // that the turf shader's filtered surface is both cheaper and steadier.
+    auto grass_pipeline = load_material(shaders, "grass")->pipeline();
+    grass_pipeline.rasterization.cull_mode = CullMode::none;
+    const auto grass_material = std::make_shared<const Material>(std::move(grass_pipeline));
+
+    auto grass_field = description.grass;
+    if (grass_field.radius > 0.0F && grass_field.density > 0.0F) {
+        if (grass_field.centre == Vec2{}) {
+            grass_field.centre = description.ball_start;
+        }
+        Renderable grass{
+            std::make_shared<const MeshData>(make_grass_field(grass_field, description.terrain)),
+            instance_of(grass_material),
+        };
+        // Shadow-mapping a hundred thousand blades across the whole volume
+        // would spend the entire map on detail finer than one of its texels.
+        grass.set_casts_shadow(false);
+        scene.add(std::move(grass));
+    }
+
     const auto ball_index = scene.size();
     scene.add(Renderable{
         std::make_shared<const MeshData>(
@@ -223,12 +246,42 @@ EntityId configure_course_session(Engine& engine, const CourseSessionDescription
             .restitution(0.78F)
             .build()));
 
-    // An unrendered slab under the turf catches anything the terrain misses.
+    // The ball has to roll on the same surface that is drawn, so the collider
+    // is sampled from the very function the terrain mesh is built from.
+    const auto& collision = description.collision;
+    const auto spacing = std::max(collision.resolution, 0.01F);
+    const auto columns = static_cast<int>(
+        std::ceil((collision.maximum.x - collision.minimum.x) / spacing)) + 1;
+    const auto rows = static_cast<int>(
+        std::ceil((collision.maximum.y - collision.minimum.y) / spacing)) + 1;
+    if (columns < 2 || rows < 2) {
+        throw std::invalid_argument{"Course collision region is smaller than one sample"};
+    }
+
+    std::vector<float> heights;
+    heights.reserve(static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows));
+    for (int row = 0; row < rows; ++row) {
+        const auto z = collision.minimum.y + static_cast<float>(row) * spacing;
+        for (int column = 0; column < columns; ++column) {
+            const auto x = collision.minimum.x + static_cast<float>(column) * spacing;
+            heights.push_back(course_terrain_height(x, z, description.terrain));
+        }
+    }
+
     static_cast<void>(engine.add_static_collider(
         physics::RigidBodyBuilder{
-            physics::Collider::box(physics::Dimensions{{400.0F, 0.5F, 400.0F}})}
+            physics::Collider::heightmap(columns, rows, spacing, spacing, std::move(heights))}
             .motion(physics::MotionType::static_body)
-            .at(physics::Position{{0.0F, -0.25F, 0.0F}})
+            .at(physics::Position{{collision.minimum.x, 0.0F, collision.minimum.y}})
+            .build()));
+
+    // A backstop far below, so a ball driven off the heightmap comes to rest
+    // instead of falling forever.
+    static_cast<void>(engine.add_static_collider(
+        physics::RigidBodyBuilder{
+            physics::Collider::box(physics::Dimensions{{2'000.0F, 0.5F, 2'000.0F}})}
+            .motion(physics::MotionType::static_body)
+            .at(physics::Position{{0.0F, collision.backstop_height - 0.5F, 0.0F}})
             .build()));
 
     const auto on_terrain = [&description](Vec2 ground, float height) {
@@ -274,6 +327,8 @@ CourseSessionDescription default_course_session(const std::filesystem::path& ass
             .shader_directory = asset_directory / "shaders",
         },
         .terrain = {},
+        .collision = {},
+        .grass = {},
         .viewpoint = {},
         .environment = environment,
     };
