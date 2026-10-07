@@ -55,6 +55,10 @@ types.
 The rendering pipeline, shader contract, units, and the offscreen capture tool are
 documented in [`docs/rendering.md`](docs/rendering.md).
 
+Research into how the industry solves the vegetation and terrain problems this
+renderer has hit, what was adopted and what was deliberately not, is recorded in
+[`docs/research-vegetation-and-terrain.md`](docs/research-vegetation-and-terrain.md).
+
 The research and resulting design decisions are recorded in
 [`docs/research.md`](docs/research.md).
 
