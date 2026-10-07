@@ -294,7 +294,8 @@ public:
     void resolve(
         RigidBody& first,
         RigidBody& second,
-        const ContactManifold& contact) {
+        const ContactManifold& contact,
+        float time_step) {
         const auto first_inverse_mass = first.inverse_mass();
         const auto second_inverse_mass = second.inverse_mass();
         const auto total_inverse_mass = first_inverse_mass + second_inverse_mass;
@@ -371,12 +372,24 @@ public:
                 tangent_dir = add(tangent_dir, {0.0F, 0.0F, noise_z});
             }
             
-            float friction_impulse_mag = std::min(v_tangent_len / total_inverse_mass, mu * 9.81F * 0.016F);
+            // Coulomb limit, as an impulse: the friction force a surface can
+            // sustain is mu times the normal load, over the step. Expressing
+            // it as mu * g * dt alone gives a velocity, not an impulse, and
+            // only happens to come out near the right number for a body that
+            // weighs what a golf ball weighs.
+            const auto load_impulse = mu * 9.81F * time_step / total_inverse_mass;
+            const auto friction_impulse_mag =
+                std::min(v_tangent_len / total_inverse_mass, load_impulse);
             const auto friction_impulse = scaled(tangent_dir, friction_impulse_mag);
-            
-            first.velocity_ = LinearVelocity{subtract(
+
+            // tangent_dir is the second body's tangential motion relative to
+            // the first, so friction drags the first along it and the second
+            // against it. Reversing these two drives the contact instead of
+            // retarding it: a ball sliding across level ground accelerates,
+            // and one resting on any slope runs away without bound.
+            first.velocity_ = LinearVelocity{add(
                 first.velocity_.metres_per_second(), scaled(friction_impulse, first_inverse_mass))};
-            second.velocity_ = LinearVelocity{add(
+            second.velocity_ = LinearVelocity{subtract(
                 second.velocity_.metres_per_second(), scaled(friction_impulse, second_inverse_mass))};
         }
     }
@@ -401,7 +414,7 @@ public:
                         .second = second.id(),
                         .contact = *contact,
                     });
-                    resolve(first, second, *contact);
+                    resolve(first, second, *contact, time_step);
                 }
             }
         }

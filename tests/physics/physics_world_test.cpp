@@ -3,9 +3,11 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -166,4 +168,91 @@ TEST_CASE("physics world validates its strategy and stepping policy") {
             std::unique_ptr<mgv::physics::CollisionDetector>{},
         }),
         std::invalid_argument);
+}
+
+TEST_CASE("friction slows a ball sliding across level ground") {
+    mgv::physics::PhysicsConfiguration configuration;
+    configuration.fixed_time_step = mgv::physics::Duration{1.0F / 120.0F};
+    mgv::physics::PhysicsWorld world{configuration};
+
+    constexpr float radius = 0.021335F;
+    const auto ball = world.add_body(
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::sphere(mgv::physics::Length{radius})}
+            .at(mgv::physics::Position{{0.0F, radius, 0.0F}})
+            .mass(mgv::physics::Mass{0.04593F})
+            .velocity(mgv::physics::LinearVelocity{{4.0F, 0.0F, 0.0F}})
+            .restitution(0.0F)
+            .build());
+    static_cast<void>(world.add_body(
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::box(mgv::physics::Dimensions{{50.0F, 0.5F, 50.0F}})}
+            .motion(mgv::physics::MotionType::static_body)
+            .at(mgv::physics::Position{{0.0F, -0.5F, 0.0F}})
+            .build()));
+
+    const auto speed_of = [&world, ball] {
+        const auto velocity = world.body(ball).linear_velocity().metres_per_second();
+        return std::sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
+    };
+    const auto initial_speed = speed_of();
+
+    for (int step = 0; step < 120; ++step) {
+        world.simulate(mgv::physics::Duration{1.0F / 120.0F});
+    }
+
+    // Contact friction can only ever remove kinetic energy. Applying the
+    // impulse with the wrong sign drives the ball instead of retarding it,
+    // and a ball resting on any slope then accelerates without bound.
+    CHECK(speed_of() < initial_speed);
+}
+
+TEST_CASE("a ball left on a slope does not accelerate without bound") {
+    mgv::physics::PhysicsConfiguration configuration;
+    configuration.fixed_time_step = mgv::physics::Duration{1.0F / 120.0F};
+    mgv::physics::PhysicsWorld world{configuration};
+
+    // A five percent grade, which is about what a fairway falls.
+    constexpr int samples = 64;
+    constexpr float spacing = 2.0F;
+    std::vector<float> heights;
+    heights.reserve(samples * samples);
+    for (int row = 0; row < samples; ++row) {
+        for (int column = 0; column < samples; ++column) {
+            heights.push_back(-0.05F * static_cast<float>(row) * spacing);
+        }
+    }
+
+    constexpr float radius = 0.021335F;
+    const auto start_x = 32.0F;
+    const auto start_z = 32.0F;
+    const auto ball = world.add_body(
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::sphere(mgv::physics::Length{radius})}
+            .at(mgv::physics::Position{{start_x, -0.05F * start_z + radius, start_z}})
+            .mass(mgv::physics::Mass{0.04593F})
+            .restitution(0.3F)
+            .build());
+    static_cast<void>(world.add_body(
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::heightmap(
+                samples, samples, spacing, spacing, std::move(heights))}
+            .motion(mgv::physics::MotionType::static_body)
+            .at(mgv::physics::Position{{0.0F, 0.0F, 0.0F}})
+            .build()));
+
+    for (int step = 0; step < 600; ++step) {   // five seconds
+        world.simulate(mgv::physics::Duration{1.0F / 120.0F});
+    }
+
+    const auto velocity = world.body(ball).linear_velocity().metres_per_second();
+    const auto speed = std::sqrt(
+        velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z);
+    const auto travelled = std::abs(world.body(ball).position().metres().z - start_z);
+
+    // Free sliding down a five percent grade for five seconds reaches about
+    // two and a half metres per second and six metres. Anything far beyond
+    // that is energy the solver invented.
+    CHECK(speed < 4.0F);
+    CHECK(travelled < 12.0F);
 }
