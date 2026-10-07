@@ -209,10 +209,16 @@ EntityId configure_course_session(Engine& engine, const CourseSessionDescription
     const auto ball = entities[ball_index];
 
     constexpr float ball_radius = 0.021335F;
+    const Vec3 ball_start{
+        description.ball_start.x,
+        course_terrain_height(
+            description.ball_start.x, description.ball_start.y, description.terrain) + ball_radius,
+        description.ball_start.y,
+    };
     static_cast<void>(engine.bind_golf_ball(
         ball,
         physics::RigidBodyBuilder{physics::Collider::sphere(physics::Length{ball_radius})}
-            .at(physics::Position{{0.0F, ball_radius, 0.0F}})
+            .at(physics::Position{ball_start})
             .mass(physics::Mass{0.04593F})
             .restitution(0.78F)
             .build()));
@@ -225,8 +231,18 @@ EntityId configure_course_session(Engine& engine, const CourseSessionDescription
             .at(physics::Position{{0.0F, -0.25F, 0.0F}})
             .build()));
 
+    const auto on_terrain = [&description](Vec2 ground, float height) {
+        return Vec3{
+            ground.x,
+            course_terrain_height(ground.x, ground.y, description.terrain) + height,
+            ground.y,
+        };
+    };
+
     Camera camera;
-    camera.look_at(description.viewpoint.position, description.viewpoint.target);
+    camera.look_at(
+        on_terrain(description.viewpoint.position, description.viewpoint.eye_height),
+        on_terrain(description.viewpoint.target, description.viewpoint.target_height));
     camera.set_perspective(
         description.viewpoint.vertical_field_of_view_degrees,
         description.viewpoint.near_plane,
@@ -247,7 +263,7 @@ CourseSessionDescription default_course_session(const std::filesystem::path& ass
     environment.sky_horizon_color = {0.70F, 0.78F, 0.86F};
     environment.ground_albedo = {0.085F, 0.125F, 0.055F};
     environment.turbidity = 2.8F;
-    environment.fog_density = 0.0035F;
+    environment.fog_density = 0.0021F;
     environment.fog_height_falloff = 0.09F;
     environment.surface_wetness = 0.25F;
     environment.exposure = exposure_from_ev100(14.0F);

@@ -99,8 +99,8 @@ int main(int argc, char** argv) {
         "wetness", "Surface wetness, 0 to 1.", "fraction"};
     const QCommandLineOption turbidity_option{
         "turbidity", "Atmospheric turbidity, 1.7 to 10.", "value"};
-    const QCommandLineOption camera_option{"camera", "Camera position, \"x,y,z\".", "vec3"};
-    const QCommandLineOption target_option{"target", "Camera target, \"x,y,z\".", "vec3"};
+    const QCommandLineOption camera_option{"camera", "Camera ground position and eye height, \"x,height,z\".", "vec3"};
+    const QCommandLineOption target_option{"target", "Look-at ground position and height, \"x,height,z\".", "vec3"};
     const QCommandLineOption fov_option{"fov", "Vertical field of view, degrees.", "degrees"};
     const QCommandLineOption azimuth_option{"sun-azimuth", "Sun bearing, degrees.", "degrees"};
     const QCommandLineOption elevation_option{
@@ -177,18 +177,20 @@ int main(int argc, char** argv) {
         if (parser.isSet(camera_option)) {
             const auto position = parse_vec3(parser.value(camera_option));
             if (!position) {
-                std::fprintf(stderr, "--camera expects \"x,y,z\".\n");
+                std::fprintf(stderr, "--camera expects \"x,height,z\".\n");
                 return 2;
             }
-            description.viewpoint.position = *position;
+            description.viewpoint.position = {position->x, position->z};
+            description.viewpoint.eye_height = position->y;
         }
         if (parser.isSet(target_option)) {
             const auto target = parse_vec3(parser.value(target_option));
             if (!target) {
-                std::fprintf(stderr, "--target expects \"x,y,z\".\n");
+                std::fprintf(stderr, "--target expects \"x,height,z\".\n");
                 return 2;
             }
-            description.viewpoint.target = *target;
+            description.viewpoint.target = {target->x, target->z};
+            description.viewpoint.target_height = target->y;
         }
         if (parser.isSet(fov_option)) {
             description.viewpoint.vertical_field_of_view_degrees =

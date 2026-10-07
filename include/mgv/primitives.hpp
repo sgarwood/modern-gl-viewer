@@ -37,11 +37,23 @@ struct CourseTerrainDescription final {
 /// Surface class belongs to the course, not to the shape of the ground: a
 /// bunker and a green can both be dead level. Carrying it on the mesh means
 /// the same authoring survives when hand-built holes replace generated ones.
+///
+/// Cut height is the single parameter that actually separates a green from
+/// rough to the eye. Everything else follows from it: taller grass shades
+/// itself, so it is darker and less glossy; it clumps, so it is patchier; and
+/// it holds a bumpier surface. Tinting three otherwise identical surfaces
+/// slightly different greens does not read at all.
 struct SurfaceClass final {
-    /// 1 on the putting surface, falling to 0 across the collar.
-    float green{};
-    /// 1 on the mown approach, falling to 0 into the rough.
-    float approach{};
+    /// Height of cut, in metres. A putting surface is around 3 mm, a collar
+    /// 10 mm, a fairway 13 mm, and rough 50 mm or more.
+    float cut_height{};
+    /// Which way the surface is mown, and how strongly, in [-1, 1].
+    ///
+    /// Negative is the green's pattern, positive the fairway's, and the two
+    /// run across each other as they do on a real course. Zero is unmown, so
+    /// a surface interpolating from green to fairway passes through no
+    /// stripes at all, which is exactly what the collar between them is.
+    float mow{};
 };
 
 [[nodiscard]] SurfaceClass course_surface_class(

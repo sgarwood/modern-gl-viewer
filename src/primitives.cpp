@@ -158,7 +158,7 @@ namespace {
         .normal = terrain_normal(x, z, d),
         // The turf shader derives everything else from world position, so the
         // texture coordinate carries the surface class instead.
-        .tex_coord = {surface.green, surface.approach},
+        .tex_coord = {surface.cut_height, surface.mow},
     };
 }
 
@@ -170,24 +170,46 @@ SurfaceClass course_surface_class(
     const CourseTerrainDescription& description) noexcept {
     const auto half = description.green_half_extent;
 
-    // The putting surface, with a collar of fringe around its edge.
+    // The putting surface, ringed by a collar of fringe. The collar is a
+    // genuine third cut, not a blend artefact: it is what gives a green its
+    // crisp edge instead of letting it dissolve into the approach.
     const auto radius = std::sqrt(x * x + z * z);
-    const auto green = 1.0F - smoothstep_between(half * 0.74F, half * 1.0F, radius);
+    // A mower changes height abruptly, so these edges are crisp. Blending a
+    // green into its surroundings over several metres is what made the three
+    // cuts indistinguishable in the first place.
+    const auto green = 1.0F - smoothstep_between(half * 0.90F, half * 0.965F, radius);
+    // A collar wide enough to read from the fairway: roughly a metre and a
+    // half of unmown fringe, which is about what a greenkeeper leaves.
+    const auto collar = 1.0F - smoothstep_between(half * 1.14F, half * 1.21F, radius);
 
     // The approach runs away from the green down -Z, narrowing slightly as it
     // goes, with mown edges rather than a hard boundary against the rough.
     const auto along = -z;
     const auto taper = 1.0F - 0.25F * std::clamp(along / description.approach_length, 0.0F, 1.0F);
     const auto half_width = description.approach_half_width * taper;
-    const auto across = 1.0F - smoothstep_between(half_width * 0.72F, half_width, std::abs(x));
-    const auto run = smoothstep_between(-half * 1.3F, half * 0.2F, along) *
+    const auto across = 1.0F - smoothstep_between(half_width * 0.93F, half_width, std::abs(x));
+    const auto run = smoothstep_between(-half * 1.4F, half * 0.4F, along) *
                      (1.0F - smoothstep_between(
                          description.approach_length * 0.82F,
                          description.approach_length,
                          along));
     const auto approach = std::clamp(across * run, 0.0F, 1.0F);
 
-    return {.green = std::clamp(green, 0.0F, 1.0F), .approach = std::max(approach, green)};
+    constexpr float green_cut = 0.0032F;
+    constexpr float collar_cut = 0.0092F;
+    constexpr float fairway_cut = 0.0135F;
+    constexpr float rough_cut = 0.062F;
+
+    auto cut = rough_cut;
+    cut = std::lerp(cut, fairway_cut, approach);
+    cut = std::lerp(cut, collar_cut, collar);
+    cut = std::lerp(cut, green_cut, green);
+
+    // The collar sits between the two patterns and is mown in neither, so the
+    // signal passes through zero there on its own.
+    const auto mow = std::lerp(approach, -1.0F, green) * (1.0F - collar * (1.0F - green));
+
+    return {.cut_height = cut, .mow = std::clamp(mow, -1.0F, 1.0F)};
 }
 
 float course_terrain_height(

@@ -7,12 +7,12 @@ layout(location = 2) in vec2 aTexCoord;
 
 out vec3 vWorldPosition;
 out vec3 vWorldNormal;
-out vec2 vSurfaceClass;
+out vec2 vSurface;
 
 void main() {
     vec4 world = uModel * vec4(aPosition, 1.0);
     vWorldPosition = world.xyz;
     vWorldNormal = mat3(uNormalMatrix) * aNormal;
-    vSurfaceClass = aTexCoord;
+    vSurface = aTexCoord;
     gl_Position = uViewProjection * world;
 }

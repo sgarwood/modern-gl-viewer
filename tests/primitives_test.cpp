@@ -116,35 +116,66 @@ TEST_CASE("course terrain rolls beyond the green") {
     CHECK(highest - lowest > 1.0F);
 }
 
-TEST_CASE("the surface class marks the green, its approach, and the rough") {
+TEST_CASE("the surface class cuts the green, its collar, the approach, and the rough") {
     const mgv::CourseTerrainDescription description;
+    const auto half = description.green_half_extent;
 
-    const auto centre = mgv::course_surface_class(0.0F, 0.0F, description);
-    CHECK(centre.green == Catch::Approx(1.0F));
-    CHECK(centre.approach == Catch::Approx(1.0F));
+    const auto putting = mgv::course_surface_class(0.0F, 0.0F, description);
+    const auto collar = mgv::course_surface_class(0.0F, -half * 0.95F, description);
+    const auto approach = mgv::course_surface_class(0.0F, -60.0F, description);
+    const auto rough = mgv::course_surface_class(90.0F, -60.0F, description);
 
-    const auto down_the_approach = mgv::course_surface_class(0.0F, -60.0F, description);
-    CHECK(down_the_approach.green == Catch::Approx(0.0F));
-    CHECK(down_the_approach.approach == Catch::Approx(1.0F));
-
-    const auto beside_the_approach = mgv::course_surface_class(90.0F, -60.0F, description);
-    CHECK(beside_the_approach.green == Catch::Approx(0.0F));
-    CHECK(beside_the_approach.approach == Catch::Approx(0.0F));
-
-    const auto behind_the_green = mgv::course_surface_class(0.0F, 140.0F, description);
-    CHECK(behind_the_green.approach == Catch::Approx(0.0F));
+    SECTION("each surface is cut shorter than the one outside it") {
+        CHECK(putting.cut_height < collar.cut_height);
+        CHECK(collar.cut_height <= approach.cut_height);
+        CHECK(approach.cut_height < rough.cut_height);
+    }
+    SECTION("a putting surface is a few millimetres and rough is centimetres") {
+        CHECK(putting.cut_height < 0.005F);
+        CHECK(rough.cut_height > 0.04F);
+        // The eye reads cut height, so the two have to differ by an order of
+        // magnitude, not by a tint.
+        CHECK(rough.cut_height / putting.cut_height > 10.0F);
+    }
+    SECTION("the green and the approach are mown across each other") {
+        CHECK(putting.mow < -0.9F);
+        CHECK(approach.mow > 0.9F);
+    }
+    SECTION("an unmown collar separates the two patterns") {
+        // Walking out from the middle of the green to the approach, the mow
+        // signal has to pass through zero somewhere: that unmown ring is what
+        // gives a green its crisp edge instead of letting the two striping
+        // patterns run into each other.
+        auto quietest = 1.0F;
+        auto quietest_cut = 0.0F;
+        for (float radius = half * 0.5F; radius <= half * 1.4F; radius += half * 0.01F) {
+            const auto sample = mgv::course_surface_class(0.0F, -radius, description);
+            if (std::abs(sample.mow) < quietest) {
+                quietest = std::abs(sample.mow);
+                quietest_cut = sample.cut_height;
+            }
+        }
+        CHECK(quietest < 0.1F);
+        SECTION("and it is cut between the two") {
+            CHECK(quietest_cut > putting.cut_height);
+            CHECK(quietest_cut < approach.cut_height);
+        }
+    }
+    SECTION("rough carries no stripes at all") {
+        CHECK(std::abs(rough.mow) < 1.0e-4F);
+    }
 }
 
-TEST_CASE("the surface class never leaves the unit range") {
+TEST_CASE("the surface class stays within its declared ranges") {
     const mgv::CourseTerrainDescription description;
 
-    for (float z = -400.0F; z <= 400.0F; z += 13.0F) {
-        for (float x = -400.0F; x <= 400.0F; x += 13.0F) {
+    for (float z = -400.0F; z <= 400.0F; z += 11.0F) {
+        for (float x = -400.0F; x <= 400.0F; x += 11.0F) {
             const auto surface = mgv::course_surface_class(x, z, description);
-            CHECK(surface.green >= 0.0F);
-            CHECK(surface.green <= 1.0F);
-            CHECK(surface.approach >= 0.0F);
-            CHECK(surface.approach <= 1.0F);
+            CHECK(surface.cut_height > 0.0F);
+            CHECK(surface.cut_height <= 0.07F);
+            CHECK(surface.mow >= -1.0F);
+            CHECK(surface.mow <= 1.0F);
         }
     }
 }
