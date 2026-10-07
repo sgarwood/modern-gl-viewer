@@ -70,6 +70,8 @@ struct CourseSessionDescription final {
     /// Near-field grass. Its centre defaults to the ball, which is where the
     /// player's attention is and where blades are large enough to see.
     GrassFieldDescription grass;
+    /// Fallen leaves, drifted against the broadleaf trees.
+    LeafLitterDescription litter;
     CourseViewpoint viewpoint;
     Environment environment;
     /// Where the ball is teed or lying, in the ground plane. Its height comes

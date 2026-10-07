@@ -2,8 +2,11 @@
 
 #include "mgv/obj_loader.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <span>
 #include <vector>
 #include "mgv/primitives.hpp"
 #include "mgv/shader_loader.hpp"
@@ -48,10 +51,33 @@ namespace {
     return transform;
 }
 
-/// Where the trees stand. Clusters set back from the approach on both sides,
-/// framing the hole without ever overhanging the line of play.
-[[nodiscard]] std::vector<Vec3> tree_positions(const CourseTerrainDescription& terrain) {
-    std::vector<Vec3> positions;
+/// One tree standing on the course.
+struct TreePlacement final {
+    TreeSpecies species{};
+    /// Which of the species' generated meshes this one uses.
+    std::size_t variant{};
+    Vec3 position{};
+    float yaw{};
+    float scale{1.0F};
+};
+
+/// Where the trees stand, and what they are.
+///
+/// Clusters set back from the approach on both sides, framing the hole
+/// without ever overhanging the line of play. Species come in runs rather
+/// than shuffled, because trees of a kind grow together and a perfectly
+/// mixed wood reads as scattered props.
+[[nodiscard]] std::vector<TreePlacement> tree_placements(
+    const CourseTerrainDescription& terrain,
+    std::size_t variants_per_species) {
+    constexpr std::array species{
+        TreeSpecies::oak,
+        TreeSpecies::beech,
+        TreeSpecies::maple,
+        TreeSpecies::pine,
+    };
+
+    std::vector<TreePlacement> placements;
     unsigned int state{20'251'007u};
     const auto random = [&state](float low, float high) {
         state = state * 1664525u + 1013904223u;
@@ -60,25 +86,88 @@ namespace {
         return low + unit * (high - low);
     };
 
-    for (int index = 0; index < 54; ++index) {
-        const auto side = index % 2 == 0 ? -1.0F : 1.0F;
-        // Positive `along` runs down the approach, matching the convention
-        // course_surface_class uses, with a few trees set behind the green.
-        const auto along = random(-terrain.green_half_extent * 3.4F, terrain.approach_length * 1.05F);
-        const auto offset = terrain.approach_half_width + random(9.0F, 68.0F);
-        const Vec3 position{side * offset, 0.0F, -along};
-        // Nothing may stand on the putting surface.
-        if (std::sqrt(position.x * position.x + position.z * position.z) <
-            terrain.green_half_extent * 2.0F) {
+    // Trees of a kind grow together, so the hole is planted in stands rather
+    // than in a shuffle. Each stand takes a centre off one side of the
+    // approach and scatters its own species around it; a perfectly mixed
+    // wood reads as scattered props, and alternating sides tree by tree --
+    // which an index-driven run would do -- is not a stand at all.
+    for (int stand = 0; stand < 16; ++stand) {
+        const auto chosen = species[static_cast<std::size_t>(
+            std::min(random(0.0F, static_cast<float>(species.size())),
+                     static_cast<float>(species.size()) - 0.001F))];
+        const auto side = random(0.0F, 1.0F) < 0.5F ? -1.0F : 1.0F;
+        const auto along = random(-terrain.green_half_extent * 3.0F, terrain.approach_length);
+        const auto offset = terrain.approach_half_width + random(11.0F, 62.0F);
+        const Vec2 centre{side * offset, -along};
+        const auto trees_in_stand = static_cast<int>(random(4.0F, 10.0F));
+
+        for (int index = 0; index < trees_in_stand; ++index) {
+            const auto scatter = random(0.0F, 2.0F * 3.14159265F);
+            const auto distance = random(0.0F, 1.0F);
+            const auto x = centre.x + std::cos(scatter) * distance * 19.0F;
+            const auto z = centre.y + std::sin(scatter) * distance * 19.0F;
+
+            // Nothing may stand on the putting surface, nor out in the line
+            // of play.
+            if (std::sqrt(x * x + z * z) < terrain.green_half_extent * 2.0F ||
+                std::abs(x) < terrain.approach_half_width + 4.0F) {
+                continue;
+            }
+
+            placements.push_back({
+                .species = chosen,
+                .variant = static_cast<std::size_t>(
+                               random(0.0F, static_cast<float>(variants_per_species))) %
+                           std::max<std::size_t>(variants_per_species, 1),
+                // Set a little into the ground, so no tree appears to balance
+                // on the surface where the terrain dips beneath it.
+                .position = {x, course_terrain_height(x, z, terrain) - 0.18F, z},
+                .yaw = random(0.0F, 6.2831853F),
+                // Pines run taller and narrower than the broadleaves beside
+                // them.
+                .scale = chosen == TreeSpecies::pine ? random(0.92F, 1.34F)
+                                                     : random(0.78F, 1.14F),
+            });
+        }
+    }
+    return placements;
+}
+
+/// Where leaves have drifted.
+///
+/// Leaves collect under and just downwind of the trees that shed them, so
+/// the drifts are placed against the trees rather than scattered over the
+/// hole. Pines are skipped: they drop needles, not leaf litter.
+[[nodiscard]] std::vector<LeafPile> leaf_piles(
+    std::span<const TreePlacement> trees,
+    float wind_direction_radians) {
+    std::vector<LeafPile> piles;
+    unsigned int state{777'301u};
+    const auto random = [&state](float low, float high) {
+        state = state * 1664525u + 1013904223u;
+        const auto unit =
+            static_cast<float>((state >> 8u) & 0xFFFFFFu) / static_cast<float>(0x1000000u);
+        return low + unit * (high - low);
+    };
+
+    const Vec2 downwind{std::sin(wind_direction_radians), -std::cos(wind_direction_radians)};
+    for (const auto& tree : trees) {
+        if (tree.species == TreeSpecies::pine || random(0.0F, 1.0F) > 0.55F) {
             continue;
         }
-        positions.push_back({
-            position.x,
-            course_terrain_height(position.x, position.z, terrain) - 0.15F,
-            position.z,
+        // Just off the trunk, carried a little downwind, as a drift does.
+        const auto drift = random(0.6F, 3.4F);
+        const auto scatter = random(-1.8F, 1.8F);
+        piles.push_back({
+            .centre = {
+                tree.position.x + downwind.x * drift + scatter,
+                tree.position.z + downwind.y * drift - scatter * 0.6F,
+            },
+            .radius = random(0.9F, 2.3F) * tree.scale,
+            .depth = random(0.05F, 0.16F),
         });
     }
-    return positions;
+    return piles;
 }
 
 /// Merges every primitive of an imported model into one mesh.
@@ -175,25 +264,83 @@ EntityId configure_course_session(Engine& engine, const CourseSessionDescription
     });
 
     // --- trees --------------------------------------------------------------
-    // A handful of distinct meshes shared across many placements: enough
-    // variety that no two neighbours match, without a mesh per tree.
-    std::vector<std::shared_ptr<const MeshData>> tree_meshes;
-    for (unsigned int variant = 0; variant < 5; ++variant) {
-        tree_meshes.push_back(std::make_shared<const MeshData>(make_tree({
-            .height = 7.5F + static_cast<float>(variant) * 1.6F,
-            .trunk_radius = 0.22F + static_cast<float>(variant) * 0.035F,
-            .canopy_lobes = 5 + static_cast<int>(variant % 3),
-            .canopy_radius = 2.9F + static_cast<float>(variant) * 0.45F,
-            .seed = 7u + variant * 131u,
-        })));
+    // Each species is drawn once, with every tree of that kind as an
+    // instance, so ninety-odd trees cost four draws rather than ninety.
+    // Colour rides on the material instance, since it is the same for every
+    // tree of a species and a uniform is cheaper than a vertex attribute
+    // repeated across a hundred thousand vertices.
+    constexpr std::size_t variants_per_species = 3;
+    const auto placements = tree_placements(description.terrain, variants_per_species);
+
+    for (const auto species : {TreeSpecies::oak,
+                               TreeSpecies::beech,
+                               TreeSpecies::maple,
+                               TreeSpecies::pine}) {
+        for (std::size_t variant = 0; variant < variants_per_species; ++variant) {
+            std::vector<MeshInstance> instances;
+            for (const auto& tree : placements) {
+                if (tree.species != species || tree.variant != variant) {
+                    continue;
+                }
+                instances.push_back({
+                    .position = tree.position,
+                    .yaw = tree.yaw,
+                    .parameters = {tree.scale, 0.0F, 0.0F, 0.0F},
+                });
+            }
+            if (instances.empty()) {
+                continue;
+            }
+
+            auto mesh = make_tree({
+                .species = species,
+                .height = 9.5F + static_cast<float>(variant) * 2.1F,
+                .spread = 0.88F + static_cast<float>(variant) * 0.14F,
+                .seed = 17u + static_cast<unsigned int>(variant) * 311u +
+                        static_cast<unsigned int>(species) * 7919u,
+            });
+            mesh.instances = std::move(instances);
+
+            const auto palette = tree_palette(species);
+            MaterialInstance material{foliage_material};
+            material.set_color("uBarkColor", {palette.bark.x, palette.bark.y, palette.bark.z, 1.0F});
+            material.set_color(
+                "uLeafShadeColor",
+                {palette.leaf_shade.x, palette.leaf_shade.y, palette.leaf_shade.z, 1.0F});
+            material.set_color(
+                "uLeafSunColor",
+                {palette.leaf_sun.x, palette.leaf_sun.y, palette.leaf_sun.z, 1.0F});
+            // Needles scatter light differently from a broad leaf, and a
+            // conifer's crown is far denser.
+            material.set_color(
+                "uFoliageResponse",
+                {species == TreeSpecies::pine ? 0.45F : 1.0F,
+                 species == TreeSpecies::pine ? 0.22F : 1.0F,
+                 0.0F,
+                 0.0F});
+
+            scene.add(Renderable{
+                std::make_shared<const MeshData>(std::move(mesh)),
+                std::make_shared<const MaterialInstance>(std::move(material)),
+            });
+        }
     }
-    std::size_t placement{};
-    for (const auto& position : tree_positions(description.terrain)) {
-        const auto& mesh = tree_meshes[placement % tree_meshes.size()];
-        const auto yaw = static_cast<float>(placement) * 1.37F;
-        const auto scale = 0.82F + static_cast<float>(placement % 7) * 0.07F;
-        scene.add(Renderable{mesh, instance_of(foliage_material), placed(position, yaw, scale)});
-        ++placement;
+
+    // --- fallen leaves --------------------------------------------------------
+    auto leaf_pipeline = load_material(shaders, "leaf")->pipeline();
+    leaf_pipeline.rasterization.cull_mode = CullMode::none;
+    const auto leaf_material = std::make_shared<const Material>(std::move(leaf_pipeline));
+
+    const auto piles = leaf_piles(placements, description.environment.wind_direction_radians);
+    if (!piles.empty() && description.litter.density > 0.0F) {
+        Renderable litter{
+            std::make_shared<const MeshData>(
+                make_leaf_litter(piles, description.litter, description.terrain)),
+            instance_of(leaf_material),
+        };
+        // Tens of thousands of leaves, each finer than a shadow-map texel.
+        litter.set_casts_shadow(false);
+        scene.add(std::move(litter));
     }
 
     // --- near-field grass ---------------------------------------------------
@@ -329,6 +476,7 @@ CourseSessionDescription default_course_session(const std::filesystem::path& ass
         .terrain = {},
         .collision = {},
         .grass = {},
+        .litter = {},
         .viewpoint = {},
         .environment = environment,
     };

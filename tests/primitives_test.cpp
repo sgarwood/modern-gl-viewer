@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <vector>
 
 namespace {
 
@@ -335,4 +337,208 @@ TEST_CASE("a grass field rejects a degenerate description") {
     auto no_density = field;
     no_density.density = 0.0F;
     CHECK_THROWS(mgv::make_grass_field(no_density, terrain));
+}
+
+namespace {
+
+struct Extent final {
+    float width{};
+    float height{};
+    float foliage_base{};
+};
+
+[[nodiscard]] Extent measure(const mgv::MeshData& tree) {
+    auto lowest_foliage = std::numeric_limits<float>::max();
+    auto highest = 0.0F;
+    auto widest = 0.0F;
+    for (const auto& vertex : tree.vertices) {
+        highest = std::max(highest, vertex.position.y);
+        widest = std::max(widest, std::sqrt(vertex.position.x * vertex.position.x +
+                                            vertex.position.z * vertex.position.z));
+        // tex_coord.x marks canopy rather than bark.
+        if (vertex.tex_coord.x > 0.5F) {
+            lowest_foliage = std::min(lowest_foliage, vertex.position.y);
+        }
+    }
+    return {.width = widest * 2.0F, .height = highest, .foliage_base = lowest_foliage};
+}
+
+[[nodiscard]] mgv::MeshData grow(mgv::TreeSpecies species) {
+    return mgv::make_tree({.species = species, .height = 12.0F, .spread = 1.0F, .seed = 5u});
+}
+
+} // namespace
+
+TEST_CASE("each species is identifiable by its proportions alone") {
+    const auto oak = measure(grow(mgv::TreeSpecies::oak));
+    const auto beech = measure(grow(mgv::TreeSpecies::beech));
+    const auto maple = measure(grow(mgv::TreeSpecies::maple));
+    const auto pine = measure(grow(mgv::TreeSpecies::pine));
+
+    SECTION("an oak spreads wider than anything else") {
+        CHECK(oak.width > beech.width);
+        CHECK(oak.width > maple.width);
+        CHECK(oak.width > pine.width);
+    }
+    SECTION("a pine is the narrowest") {
+        CHECK(pine.width < beech.width);
+        CHECK(pine.width < maple.width);
+    }
+    SECTION("a beech carries its crown higher than an oak") {
+        CHECK(beech.foliage_base > oak.foliage_base);
+    }
+    SECTION("every species reaches about the height it was asked for") {
+        for (const auto& extent : {oak, beech, maple, pine}) {
+            CHECK(extent.height > 9.0F);
+            CHECK(extent.height < 16.0F);
+        }
+    }
+}
+
+TEST_CASE("spread widens a crown without raising it") {
+    const auto narrow = measure(
+        mgv::make_tree({.species = mgv::TreeSpecies::maple, .height = 12.0F, .spread = 0.7F, .seed = 3u}));
+    const auto wide = measure(
+        mgv::make_tree({.species = mgv::TreeSpecies::maple, .height = 12.0F, .spread = 1.4F, .seed = 3u}));
+
+    CHECK(wide.width > narrow.width * 1.4F);
+    CHECK(wide.height == Catch::Approx(narrow.height).epsilon(0.25F));
+}
+
+TEST_CASE("a tree is built from both bark and canopy") {
+    const auto tree = grow(mgv::TreeSpecies::oak);
+
+    auto bark = 0;
+    auto canopy = 0;
+    for (const auto& vertex : tree.vertices) {
+        (vertex.tex_coord.x > 0.5F ? canopy : bark) += 1;
+    }
+    CHECK(bark > 0);
+    CHECK(canopy > bark);
+    CHECK(tree.indices.size() % 3 == 0);
+    for (const auto index : tree.indices) {
+        CHECK(index < tree.vertices.size());
+    }
+}
+
+TEST_CASE("a tree rejects a degenerate description") {
+    CHECK_THROWS(mgv::make_tree({.species = mgv::TreeSpecies::oak, .height = 0.0F}));
+    CHECK_THROWS(mgv::make_tree({.species = mgv::TreeSpecies::oak, .height = 9.0F, .spread = 0.0F}));
+}
+
+TEST_CASE("every species has its own palette") {
+    const auto oak = mgv::tree_palette(mgv::TreeSpecies::oak);
+    const auto beech = mgv::tree_palette(mgv::TreeSpecies::beech);
+    const auto pine = mgv::tree_palette(mgv::TreeSpecies::pine);
+
+    SECTION("beech bark is the pale grey it is famous for") {
+        CHECK(beech.bark.x > oak.bark.x * 1.5F);
+        // Grey, not brown: the three channels stay close together.
+        CHECK(beech.bark.x - beech.bark.z < 0.03F);
+    }
+    SECTION("pine needles are the darkest foliage") {
+        CHECK(pine.leaf_sun.y < oak.leaf_sun.y);
+        CHECK(pine.leaf_shade.y < oak.leaf_shade.y);
+    }
+    SECTION("sunlit foliage is lighter than shaded foliage") {
+        for (const auto species : {mgv::TreeSpecies::oak, mgv::TreeSpecies::beech,
+                                   mgv::TreeSpecies::maple, mgv::TreeSpecies::pine}) {
+            const auto palette = mgv::tree_palette(species);
+            CHECK(palette.leaf_sun.y > palette.leaf_shade.y);
+        }
+    }
+}
+
+TEST_CASE("a leaf is a closed outline about its stem") {
+    const auto leaf = mgv::make_leaf(5);
+
+    REQUIRE_FALSE(leaf.empty());
+    CHECK(leaf.vertices.front().position.z == Catch::Approx(-0.5F));
+    CHECK(leaf.vertices.back().position.z == Catch::Approx(0.5F));
+    for (const auto& vertex : leaf.vertices) {
+        CHECK(std::abs(vertex.position.x) < 0.3F);
+        CHECK(vertex.position.y == 0.0F);
+    }
+    CHECK(leaf.indices.size() % 3 == 0);
+}
+
+TEST_CASE("a leaf rejects a degenerate segment count") {
+    CHECK_THROWS(mgv::make_leaf(1));
+}
+
+TEST_CASE("leaf litter heaps into its drifts and rests on the terrain") {
+    const mgv::CourseTerrainDescription terrain;
+    const std::vector<mgv::LeafPile> piles{
+        {.centre = {30.0F, -70.0F}, .radius = 1.6F, .depth = 0.12F},
+        {.centre = {-25.0F, -40.0F}, .radius = 1.1F, .depth = 0.07F},
+    };
+    const mgv::LeafLitterDescription litter;
+
+    const auto drift = mgv::make_leaf_litter(piles, litter, terrain);
+
+    REQUIRE(drift.instances.size() > 200);
+    for (const auto& leaf : drift.instances) {
+        const auto ground = mgv::course_terrain_height(leaf.position.x, leaf.position.z, terrain);
+        SECTION("no leaf is below the ground or floating above the heap") {
+            CHECK(leaf.position.y >= ground - 1.0e-4F);
+            CHECK(leaf.position.y <= ground + 0.13F);
+        }
+        SECTION("each leaf knows how deep it lies, for the shader to shade it") {
+            CHECK(leaf.parameters.w >= 0.0F);
+            CHECK(leaf.parameters.w <= 1.0F);
+        }
+
+        auto inside_a_pile = false;
+        for (const auto& pile : piles) {
+            const auto dx = leaf.position.x - pile.centre.x;
+            const auto dz = leaf.position.z - pile.centre.y;
+            inside_a_pile = inside_a_pile ||
+                            std::sqrt(dx * dx + dz * dz) <= pile.radius + 1.0e-3F;
+        }
+        CHECK(inside_a_pile);
+    }
+}
+
+TEST_CASE("leaf litter thins towards the rim of a drift") {
+    const mgv::CourseTerrainDescription terrain;
+    const std::vector<mgv::LeafPile> piles{
+        {.centre = {0.0F, -60.0F}, .radius = 2.0F, .depth = 0.12F}};
+
+    const auto drift = mgv::make_leaf_litter(piles, {}, terrain);
+
+    // A drift that keeps its density to the very edge ends on a hard circle.
+    // Compare the inner half of the disc with the outer half by area.
+    auto inner = 0;
+    auto outer = 0;
+    for (const auto& leaf : drift.instances) {
+        const auto distance = std::sqrt(
+            leaf.position.x * leaf.position.x +
+            (leaf.position.z + 60.0F) * (leaf.position.z + 60.0F));
+        (distance < 2.0F * 0.7071F ? inner : outer) += 1;
+    }
+    REQUIRE(inner > 0);
+    // Equal area, so equal density would give equal counts.
+    CHECK(outer < inner);
+}
+
+TEST_CASE("leaf litter with no drifts draws nothing") {
+    const mgv::CourseTerrainDescription terrain;
+
+    const auto drift = mgv::make_leaf_litter({}, {}, terrain);
+
+    REQUIRE(drift.instances.size() == 1);
+    CHECK(drift.instances.front().parameters.x == 0.0F);
+}
+
+TEST_CASE("leaf litter rejects a degenerate description") {
+    const mgv::CourseTerrainDescription terrain;
+    const std::vector<mgv::LeafPile> piles{{.centre = {}, .radius = 1.0F, .depth = 0.1F}};
+
+    mgv::LeafLitterDescription no_density;
+    no_density.density = 0.0F;
+    CHECK_THROWS(mgv::make_leaf_litter(piles, no_density, terrain));
+
+    mgv::LeafLitterDescription no_size;
+    no_size.leaf_length = 0.0F;
+    CHECK_THROWS(mgv::make_leaf_litter(piles, no_size, terrain));
 }

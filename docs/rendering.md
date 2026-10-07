@@ -109,6 +109,39 @@ The field is static and centred on the ball. Patches that follow the camera,
 regenerated as the player walks, are the next step and are what this needs to
 become before the hike is playable.
 
+## Trees and litter
+
+Four species: oak, beech, maple and pine. What separates them is proportion,
+not colour. Crown half-width and the height at which foliage starts identify a
+tree across a fairway long before any difference in hue does, so each species
+is a set of proportions -- bole height, trunk radius, crown width, how far up
+the crown begins, whether it is taller or wider than it is round -- and the
+palette comes second.
+
+A broadleaf crown is limbs rising out of the bole with masses of foliage
+filling the ellipsoid they reach into, biased outwards because foliage grows
+where the light is. A trunk that rises and stops with a ball of leaves on top
+is the single thing that makes a generated tree look generated. A pine is
+built instead from drooping whorls narrowing to a leader.
+
+Each mass is displaced by a smooth function of direction. Overlapping smooth
+spheres still read as spheres, because the silhouette stays circular and the
+eye reads silhouette first. The displacement has to be coherent: hashing each
+vertex of a low-poly sphere turns it into visible flat facets, which looks
+worse than the sphere did.
+
+Each species is one draw with every tree of that kind as an instance, and its
+colours ride on the material instance, since they are the same for every tree
+of a species. Trees are planted in stands, because trees of a kind grow
+together and a perfectly mixed wood reads as scattered props.
+
+Leaves drift against the broadleaves that shed them, carried a little
+downwind; pines are skipped, since they drop needles. Leaves fill the volume
+of each mound rather than tiling its surface, so a ball dropped into a drift
+is genuinely among them. Each leaf carries how deep it lies, which is what
+lets the shader darken the ones underneath, and the count thins towards the
+rim as well as the depth, or the drift ends on a hard circle.
+
 ## Filtering
 
 Surface detail is faded against the screen-space pixel footprint, taken from

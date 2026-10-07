@@ -2,6 +2,8 @@
 
 #include "mgv/mesh.hpp"
 
+#include <span>
+
 namespace mgv {
 
 /// Builds an inward-facing hemisphere-plus-skirt used as a sky dome.
@@ -90,19 +92,47 @@ struct SurfaceClass final {
 /// given a gentle curl so it does not read as a flat sheet of card.
 [[nodiscard]] MeshData make_flag(float width, float height, int segments);
 
-/// A broadleaf tree, as one mesh.
+/// The species a tree is grown as.
 ///
-/// `tex_coord.x` marks material: 0 for bark, 1 for canopy, so a single shader
-/// can light both without a second draw call per tree.
+/// Silhouette is what identifies a tree at a hundred metres, long before
+/// colour does, so each species differs first in how its crown is built: a
+/// pine in whorls around a bare lower trunk, an oak in wide low masses, a
+/// beech in a tall egg held high, a maple in a tight round head.
+enum class TreeSpecies {
+    oak,
+    beech,
+    maple,
+    pine,
+};
+
+/// A tree, as one mesh.
+///
+/// `tex_coord.x` marks material: 0 for bark, 1 for canopy, so a single
+/// shader lights both without a second draw call per tree.
 struct TreeDescription final {
-    float height{9.0F};
-    float trunk_radius{0.26F};
-    /// Stacked canopy masses, which read far better than one ball of leaves.
-    int canopy_lobes{5};
-    float canopy_radius{3.4F};
-    /// Seed for the per-tree variation in lobe placement and size.
+    TreeSpecies species{TreeSpecies::oak};
+    /// Overall height, in metres.
+    float height{11.0F};
+    /// Multiplies the species' natural crown width.
+    float spread{1.0F};
+    /// Seed for the per-tree variation in branch and lobe placement.
     unsigned int seed{1u};
 };
+
+/// The colours a species is lit with, in linear sRGB.
+///
+/// They are kept out of the mesh because every tree of a species shares them,
+/// and a shader uniform is cheaper than a vertex attribute repeated across a
+/// hundred thousand vertices.
+struct TreePalette final {
+    Vec3 bark;
+    /// Foliage deep inside the crown, in its own shade.
+    Vec3 leaf_shade;
+    /// Foliage on the outside, which is younger and catches the sun.
+    Vec3 leaf_sun;
+};
+
+[[nodiscard]] TreePalette tree_palette(TreeSpecies species) noexcept;
 
 [[nodiscard]] MeshData make_tree(const TreeDescription& description);
 
@@ -138,6 +168,42 @@ struct GrassFieldDescription final {
 /// field is bounded rather than covering the hole.
 [[nodiscard]] MeshData make_grass_field(
     const GrassFieldDescription& field,
+    const CourseTerrainDescription& terrain);
+
+/// Builds a single fallen leaf, lying in the XZ plane and pointing +Z, of
+/// unit length. Its size, tilt, colour, and depth in the pile all arrive as
+/// instance parameters.
+[[nodiscard]] MeshData make_leaf(int segments);
+
+/// A drift of fallen leaves.
+struct LeafPile final {
+    /// Centre of the drift, in the ground plane.
+    Vec2 centre{};
+    /// How far it spreads, in metres.
+    float radius{1.3F};
+    /// How deep it is heaped at the centre, in metres.
+    float depth{0.11F};
+};
+
+struct LeafLitterDescription final {
+    /// Leaves per square metre at the heart of a drift.
+    float density{2'600.0F};
+    /// Length of a leaf, in metres.
+    float leaf_length{0.085F};
+    int segments{5};
+    unsigned int seed{4'071u};
+};
+
+/// Scatters leaves through the given drifts, heaped into a mound and resting
+/// on the terrain.
+///
+/// Leaves fill the volume of the mound rather than tiling its surface, so a
+/// ball dropped into one is genuinely among them rather than sitting on a
+/// painted disc. Each leaf carries how deep it lies, which is what lets the
+/// shader darken the ones underneath.
+[[nodiscard]] MeshData make_leaf_litter(
+    std::span<const LeafPile> piles,
+    const LeafLitterDescription& litter,
     const CourseTerrainDescription& terrain);
 
 /// Builds a flat, subdivided square in the XZ plane, centred on the origin and
