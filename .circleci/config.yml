@@ -3,6 +3,9 @@ parameters:
   run_release:
     type: boolean
     default: false
+  run_macos:
+    type: boolean
+    default: false
   release_tag:
     type: string
     default: v0.2.0-rc.1
@@ -266,6 +269,9 @@ workflows:
     jobs:
     - build_ubuntu
     - build_windows
+  macos_validation:
+    when: << pipeline.parameters.run_macos >>
+    jobs:
     - build_macos
   manual_prerelease:
     when: << pipeline.parameters.run_release >>
