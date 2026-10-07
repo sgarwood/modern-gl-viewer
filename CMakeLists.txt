@@ -46,6 +46,9 @@ set(ozz_build_samples OFF CACHE BOOL "" FORCE)
 set(ozz_build_howtos OFF CACHE BOOL "" FORCE)
 set(ozz_build_tests OFF CACHE BOOL "" FORCE)
 set(ozz_build_postfix OFF CACHE BOOL "" FORCE)
+# The project uses CMake's default DLL-based MSVC runtime. Keep Ozz on the
+# same ABI so its static libraries can be linked into project executables.
+set(ozz_build_msvc_rt_dll ON CACHE BOOL "" FORCE)
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
     set(mgv_ozz_exclude_from_all EXCLUDE_FROM_ALL)
 endif()
