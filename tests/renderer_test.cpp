@@ -22,6 +22,9 @@ struct Calls final {
     bool reject_pipelines{};
     bool reject_draws{};
     bool reject_samplers{};
+    bool refuse_mesh_updates{};
+    int mesh_updates{};
+    std::size_t last_updated_vertices{};
     mgv::PrimitiveTopology topology{mgv::PrimitiveTopology::triangle_list};
     mgv::CullMode cull_mode{mgv::CullMode::none};
     mgv::PolygonMode polygon_mode{mgv::PolygonMode::fill};
@@ -68,6 +71,14 @@ public:
     std::unique_ptr<mgv::MeshResource> create_mesh(const mgv::MeshData&) override {
         ++calls_.meshes;
         return std::make_unique<FakeMesh>();
+    }
+    bool update_mesh(mgv::MeshResource&, const mgv::MeshData& mesh) override {
+        if (calls_.refuse_mesh_updates) {
+            return false;
+        }
+        ++calls_.mesh_updates;
+        calls_.last_updated_vertices = mesh.vertices.size();
+        return true;
     }
     std::unique_ptr<mgv::RenderPipelineResource> create_pipeline(
         const mgv::RenderPipelineDescriptor& descriptor) override {
@@ -741,4 +752,58 @@ TEST_CASE("an authored fit preserves the modelled units of an asset") {
         const auto transform = fitted.renderable_transform(ids.front());
         CHECK(transform.scale().x != 1.0F);
     }
+}
+
+TEST_CASE("renderer replaces geometry in place and rebounds it") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    const auto ids = renderer.load(unit_triangle(), {"vertex", "fragment", "test.vert", "test.frag"});
+    REQUIRE(ids.size() == 1);
+    const auto created = calls.meshes;
+
+    mgv::MeshData larger{
+        .vertices = {{{-20.0F, 0.0F, -20.0F}, {0, 1, 0}, {0, 0}},
+                     {{20.0F, 0.0F, -20.0F}, {0, 1, 0}, {1, 0}},
+                     {{0.0F, 0.0F, 20.0F}, {0, 1, 0}, {0, 1}},
+                     {{0.0F, 3.0F, 0.0F}, {0, 1, 0}, {1, 1}}},
+        .indices = {0, 1, 2, 0, 1, 3},
+    };
+
+    CHECK(renderer.update_mesh(ids.front(), larger));
+
+    SECTION("the backend resource is reused rather than recreated") {
+        CHECK(calls.meshes == created);
+        CHECK(calls.mesh_updates == 1);
+        CHECK(calls.last_updated_vertices == 4);
+    }
+    SECTION("the renderable keeps its identity and transform") {
+        CHECK(renderer.renderable_transform(ids.front()).scale().x != 0.0F);
+    }
+    SECTION("the new geometry is visible where the old would have been culled") {
+        // The replacement spans forty metres; a camera far off to the side
+        // sees it only if the bounds were recalculated.
+        mgv::Camera camera;
+        camera.look_at({0.0F, 2.0F, 60.0F}, {0.0F, 0.0F, 0.0F});
+        camera.set_perspective(45.0F, 0.1F, 500.0F);
+        renderer.set_camera(camera);
+        renderer.render({.framebuffer_width = 64, .framebuffer_height = 64});
+        CHECK(renderer.last_frame_statistics().submitted == 1);
+    }
+}
+
+TEST_CASE("renderer reports a backend that cannot replace geometry") {
+    Calls calls;
+    calls.refuse_mesh_updates = true;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    const auto ids = renderer.load(unit_triangle(), {"vertex", "fragment", "test.vert", "test.frag"});
+
+    CHECK_FALSE(renderer.update_mesh(ids.front(), unit_triangle()));
+}
+
+TEST_CASE("replacing the geometry of an unknown renderable is an error") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    static_cast<void>(renderer.load(unit_triangle(), {"vertex", "fragment", "test.vert", "test.frag"}));
+
+    CHECK_THROWS_AS(renderer.update_mesh(mgv::RenderableId{9999}, unit_triangle()), std::out_of_range);
 }

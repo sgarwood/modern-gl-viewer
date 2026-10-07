@@ -449,6 +449,23 @@ void Renderer::set_renderable_transform(RenderableId id, Transform transform) {
     found->transform = std::move(transform);
 }
 
+bool Renderer::update_mesh(RenderableId id, const MeshData& mesh) {
+    if (mesh.empty()) {
+        throw std::invalid_argument{"Cannot replace a renderable's geometry with an empty mesh"};
+    }
+    const auto found = std::ranges::find(impl_->renderables, id, &GpuRenderable::id);
+    if (found == impl_->renderables.end()) {
+        throw std::out_of_range{"Unknown renderable identifier"};
+    }
+    if (!impl_->backend->update_mesh(*found->mesh, mesh)) {
+        return false;
+    }
+    // Bounds come from the geometry, so replacing it without recalculating
+    // them culls the new mesh against the old one's extent.
+    found->local_bounds = calculate_bounds(mesh).sphere;
+    return true;
+}
+
 Transform Renderer::renderable_transform(RenderableId id) const {
     const auto found = std::ranges::find(impl_->renderables, id, &GpuRenderable::id);
     if (found == impl_->renderables.end()) {

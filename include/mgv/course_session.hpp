@@ -6,6 +6,7 @@
 #include "mgv/renderer.hpp"
 
 #include <filesystem>
+#include <optional>
 
 namespace mgv {
 
@@ -66,6 +67,9 @@ struct CourseCollisionDescription final {
 struct CourseSessionDescription final {
     CourseAssets assets;
     CourseTerrainDescription terrain;
+    /// How the terrain is cut up for drawing. Its centre is ignored: the
+    /// session keeps it on the camera.
+    TerrainTessellation tessellation;
     CourseCollisionDescription collision;
     /// Near-field grass. Its centre defaults to the ball, which is where the
     /// player's attention is and where blades are large enough to see.
@@ -79,12 +83,40 @@ struct CourseSessionDescription final {
     Vec2 ball_start{4.6F, -44.0F};
 };
 
-/// Builds the sky dome, terrain, and ball, binds the ball to a rigid body,
-/// installs the ground collider, and applies the viewpoint and environment.
+/// A hole that has been built, and the handles needed to keep it up to date
+/// as the player moves through it.
+struct CourseSession final {
+    EntityId ball{};
+    EntityId terrain{};
+    /// Absent when the session was built with no blade field.
+    std::optional<EntityId> grass{};
+    /// Where the terrain's detail is currently centred, already snapped.
+    Vec2 terrain_centre{};
+    /// Where the blade field is currently centred.
+    Vec2 grass_centre{};
+};
+
+/// Builds the sky dome, terrain, trees, leaves, grass, and ball, binds the
+/// ball to a rigid body, installs the ground collider, and applies the
+/// viewpoint and environment.
 ///
 /// Every frontend goes through this one function so the interactive window and
-/// the offscreen capture tool render the same scene. Returns the ball entity.
-EntityId configure_course_session(Engine& engine, const CourseSessionDescription& description);
+/// the offscreen capture tool render the same scene.
+[[nodiscard]] CourseSession configure_course_session(
+    Engine& engine,
+    const CourseSessionDescription& description);
+
+/// Moves the terrain's detail and the blade field to follow the camera,
+/// rebuilding their geometry when it has walked far enough to matter.
+///
+/// Both are built around a centre. Left where they were created, the fine
+/// tessellation and every blade of grass stay behind as the player walks up
+/// the hole, which is the whole reason the hike could not be played.
+///
+/// Returns true if anything was rebuilt this call. Cheap when nothing has:
+/// the terrain only moves on whole steps of its own innermost grid, so a
+/// camera drifting within one cell costs a comparison.
+bool stream_course(Engine& engine, CourseSession& session, const CourseSessionDescription& description);
 
 /// A clear late-morning round on the bundled assets.
 [[nodiscard]] CourseSessionDescription default_course_session(

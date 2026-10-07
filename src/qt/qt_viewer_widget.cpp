@@ -15,15 +15,6 @@
 #include <stdexcept>
 #include <utility>
 
-namespace {
-
-void configure_golf_session(mgv::Engine& engine, const mgv::AssetPaths& assets) {
-    const auto description = mgv::default_course_session(assets.model.parent_path());
-    static_cast<void>(mgv::configure_course_session(engine, description));
-}
-
-} // namespace
-
 QtViewerWidget::QtViewerWidget(mgv::AssetPaths assets, QWidget* parent)
     : QOpenGLWidget{parent}, assets_{std::move(assets)} {
     setFocusPolicy(Qt::StrongFocus);
@@ -45,7 +36,8 @@ void QtViewerWidget::load_assets(mgv::AssetPaths assets) {
 
     makeCurrent();
     try {
-        configure_golf_session(*engine_, assets_);
+        course_ = mgv::default_course_session(assets_.model.parent_path());
+        session_ = mgv::configure_course_session(*engine_, course_);
         error_.clear();
         animation_timer_.start();
     } catch (const std::exception& error) {
@@ -75,7 +67,8 @@ void QtViewerWidget::initializeGL() {
             const auto* current = QOpenGLContext::currentContext();
             return current == nullptr ? nullptr : current->getProcAddress(QByteArray{name});
         }));
-        configure_golf_session(*engine_, assets_);
+        course_ = mgv::default_course_session(assets_.model.parent_path());
+        session_ = mgv::configure_course_session(*engine_, course_);
         error_.clear();
         animation_timer_.start();
     } catch (const std::exception& error) {
@@ -86,6 +79,9 @@ void QtViewerWidget::initializeGL() {
 void QtViewerWidget::paintGL() {
     if (engine_ && error_.isEmpty()) {
         try {
+            // Detail follows the camera, so this has to run before the frame
+            // that uses it.
+            static_cast<void>(mgv::stream_course(*engine_, session_, course_));
             const auto scale = devicePixelRatioF();
             engine_->tick({
                 .framebuffer_width = std::max(1, static_cast<int>(std::lround(static_cast<double>(width()) * scale))),

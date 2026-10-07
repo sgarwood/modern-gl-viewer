@@ -157,6 +157,10 @@ public:
         EntityId entity,
         animation::AnimationClipId clip);
     void remove(EntityId entity);
+    /// Replaces an entity's geometry in place, keeping its material,
+    /// transform, physics binding, and identity. Returns false if the
+    /// backend cannot update geometry in place.
+    bool update_mesh(EntityId entity, const MeshData& mesh);
     void add_foliage_volume(physics::FoliageVolume volume);
 
     void enqueue(EngineCommand command);

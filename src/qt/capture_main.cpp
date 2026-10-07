@@ -22,6 +22,7 @@
 #include <QStringList>
 #include <QSurfaceFormat>
 
+#include <cmath>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -108,6 +109,11 @@ int main(int argc, char** argv) {
         "wind", "Wind speed in metres per second.", "mps"};
     const QCommandLineOption ball_option{
         "ball", "Where the ball lies, \"x,0,z\" in the ground plane.", "vec3"};
+    const QCommandLineOption walk_option{
+        "walk",
+        "Metres to advance the camera towards its target each frame, which "
+        "exercises the detail streaming.",
+        "metres"};
     const QCommandLineOption camera_option{"camera", "Camera ground position and eye height, \"x,height,z\".", "vec3"};
     const QCommandLineOption target_option{"target", "Look-at ground position and height, \"x,height,z\".", "vec3"};
     const QCommandLineOption fov_option{"fov", "Vertical field of view, degrees.", "degrees"};
@@ -128,6 +134,7 @@ int main(int argc, char** argv) {
                                grass_radius_option,
                                wind_option,
                                ball_option,
+                               walk_option,
                                camera_option,
                                target_option,
                                fov_option,
@@ -247,14 +254,45 @@ int main(int argc, char** argv) {
             description.environment.wind_speed = parser.value(wind_option).toFloat();
         }
 
-        const auto ball = mgv::configure_course_session(*engine, description);
+        auto session = mgv::configure_course_session(*engine, description);
+        const auto walk = parser.isSet(walk_option) ? parser.value(walk_option).toFloat() : 0.0F;
+        auto streamed = 0;
         for (int frame = 0; frame < frames; ++frame) {
+            if (walk != 0.0F) {
+                // Step along the ground towards where the camera is looking,
+                // keeping the eye at its height above the terrain.
+                auto camera = engine->camera();
+                const auto eye = camera.position();
+                const auto target = camera.target();
+                const auto forward_x = target.x - eye.x;
+                const auto forward_z = target.z - eye.z;
+                const auto length = std::sqrt(forward_x * forward_x + forward_z * forward_z);
+                if (length > 1.0e-4F) {
+                    const auto step_x = forward_x / length * walk;
+                    const auto step_z = forward_z / length * walk;
+                    const mgv::Vec2 next{eye.x + step_x, eye.z + step_z};
+                    const auto ground =
+                        mgv::course_terrain_height(next.x, next.y, description.terrain);
+                    camera.look_at(
+                        {next.x, ground + description.viewpoint.eye_height, next.y},
+                        {target.x + step_x, target.y, target.z + step_z});
+                    engine->set_camera(std::move(camera));
+                }
+            }
+            streamed += mgv::stream_course(*engine, session, description) ? 1 : 0;
             engine->tick({width, height});
         }
+        std::printf("streamed=%d\n", streamed);
+        const auto eye = engine->camera().position();
+        std::printf(
+            "camera=(%.2f, %.2f, %.2f)\n",
+            static_cast<double>(eye.x),
+            static_cast<double>(eye.y),
+            static_cast<double>(eye.z));
 
         // Where the ball actually came to rest, which is the quickest way to
         // see that it is resting on the terrain rather than falling past it.
-        const auto lie = engine->transform(ball).position();
+        const auto lie = engine->transform(session.ball).position();
         std::printf(
             "ball=(%.3f, %.3f, %.3f) terrain=%.3f\n",
             static_cast<double>(lie.x),

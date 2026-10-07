@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mgv/course_session.hpp"
 #include "mgv/engine.hpp"
 
 #include <QOpenGLWidget>
@@ -34,6 +35,8 @@ private:
 
     mgv::AssetPaths assets_;
     std::unique_ptr<mgv::Engine> engine_;
+    mgv::CourseSessionDescription course_;
+    mgv::CourseSession session_;
     QTimer animation_timer_;
     QString error_;
 };

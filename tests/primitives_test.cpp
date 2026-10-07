@@ -182,25 +182,25 @@ TEST_CASE("the surface class stays within its declared ranges") {
     }
 }
 
-TEST_CASE("course terrain geometry is watertight where the rings meet the green") {
-    mgv::CourseTerrainDescription description;
-    description.green_resolution = 8;
-    description.rings = 4;
-    description.outer_extent = 80.0F;
+TEST_CASE("terrain geometry is watertight and sits on the analytic surface") {
+    const mgv::CourseTerrainDescription course;
+    mgv::TerrainTessellation tessellation;
+    tessellation.inner_resolution = 8;
+    tessellation.rings = 4;
+    tessellation.outer_extent = 80.0F;
 
-    const auto terrain = mgv::make_course_terrain(description);
+    const auto terrain = mgv::make_course_terrain(course, tessellation);
 
     REQUIRE_FALSE(terrain.empty());
     CHECK(terrain.indices.size() % 3 == 0);
     for (const auto index : terrain.indices) {
         CHECK(index < terrain.vertices.size());
     }
-
     SECTION("every vertex sits on the analytic surface") {
         for (const auto& vertex : terrain.vertices) {
             CHECK(vertex.position.y ==
                   Catch::Approx(mgv::course_terrain_height(
-                                    vertex.position.x, vertex.position.z, description))
+                                    vertex.position.x, vertex.position.z, course))
                       .margin(1.0e-4F));
         }
     }
@@ -213,22 +213,91 @@ TEST_CASE("course terrain geometry is watertight where the rings meet the green"
     }
 }
 
-TEST_CASE("course terrain construction rejects degenerate descriptions") {
-    mgv::CourseTerrainDescription description;
-    description.green_resolution = 4;
-    description.rings = 2;
+TEST_CASE("terrain detail follows wherever the tessellation is centred") {
+    const mgv::CourseTerrainDescription course;
+    mgv::TerrainTessellation tessellation;
+    tessellation.inner_resolution = 8;
+    tessellation.rings = 3;
+    tessellation.outer_extent = 60.0F;
+    tessellation.inner_half_extent = 6.0F;
 
-    auto no_green = description;
-    no_green.green_half_extent = 0.0F;
-    CHECK_THROWS(mgv::make_course_terrain(no_green));
+    const auto nearest_vertex_to = [&course](const mgv::MeshData& mesh, mgv::Vec2 point) {
+        auto best = std::numeric_limits<float>::max();
+        for (const auto& vertex : mesh.vertices) {
+            const auto dx = vertex.position.x - point.x;
+            const auto dz = vertex.position.z - point.y;
+            best = std::min(best, std::sqrt(dx * dx + dz * dz));
+        }
+        static_cast<void>(course);
+        return best;
+    };
 
-    auto inverted = description;
-    inverted.outer_extent = description.green_half_extent * 0.5F;
-    CHECK_THROWS(mgv::make_course_terrain(inverted));
+    tessellation.centre = {0.0F, 0.0F};
+    const auto at_origin = mgv::make_course_terrain(course, tessellation);
+    tessellation.centre = {140.0F, -95.0F};
+    const auto moved = mgv::make_course_terrain(course, tessellation);
 
-    auto no_rings = description;
+    const mgv::Vec2 far_point{140.0F, -95.0F};
+    SECTION("detail is coarse there before the centre moves") {
+        CHECK(nearest_vertex_to(at_origin, far_point) > 1.0F);
+    }
+    SECTION("and fine there after it does") {
+        CHECK(nearest_vertex_to(moved, far_point) < 1.0F);
+    }
+    SECTION("the two meshes have identical topology, so one can replace the other") {
+        CHECK(moved.vertices.size() == at_origin.vertices.size());
+        CHECK(moved.indices == at_origin.indices);
+    }
+}
+
+TEST_CASE("the tessellation centre is snapped to whole grid steps") {
+    mgv::TerrainTessellation tessellation;
+    tessellation.inner_half_extent = 8.0F;
+    tessellation.inner_resolution = 64;
+    const auto step = mgv::terrain_inner_step(tessellation);
+    CHECK(step == Catch::Approx(0.25F));
+
+    // Sub-step movement must leave the grid exactly where it was, or every
+    // feature finer than a cell crawls as the player walks.
+    tessellation.centre = {10.0F, -4.0F};
+    const auto base = mgv::snapped_terrain_centre(tessellation);
+    tessellation.centre = {10.0F + step * 0.4F, -4.0F + step * 0.9F};
+    const auto nudged = mgv::snapped_terrain_centre(tessellation);
+    CHECK(nudged.x == Catch::Approx(base.x));
+    CHECK(nudged.y == Catch::Approx(base.y));
+
+    SECTION("a whole step moves it by exactly one") {
+        tessellation.centre = {10.0F + step, -4.0F};
+        const auto stepped = mgv::snapped_terrain_centre(tessellation);
+        CHECK(stepped.x - base.x == Catch::Approx(step));
+    }
+    SECTION("the snapped centre is always on the lattice") {
+        for (const auto offset : {-37.3F, -0.1F, 0.0F, 5.55F, 912.7F}) {
+            tessellation.centre = {offset, offset * 0.5F};
+            const auto snapped = mgv::snapped_terrain_centre(tessellation);
+            CHECK(std::abs(std::remainder(snapped.x, step)) < 1.0e-3F);
+            CHECK(std::abs(std::remainder(snapped.y, step)) < 1.0e-3F);
+        }
+    }
+}
+
+TEST_CASE("terrain construction rejects a degenerate tessellation") {
+    const mgv::CourseTerrainDescription course;
+    mgv::TerrainTessellation tessellation;
+    tessellation.inner_resolution = 4;
+    tessellation.rings = 2;
+
+    auto no_centre = tessellation;
+    no_centre.inner_half_extent = 0.0F;
+    CHECK_THROWS(mgv::make_course_terrain(course, no_centre));
+
+    auto inverted = tessellation;
+    inverted.outer_extent = tessellation.inner_half_extent * 0.5F;
+    CHECK_THROWS(mgv::make_course_terrain(course, inverted));
+
+    auto no_rings = tessellation;
     no_rings.rings = 0;
-    CHECK_THROWS(mgv::make_course_terrain(no_rings));
+    CHECK_THROWS(mgv::make_course_terrain(course, no_rings));
 }
 
 TEST_CASE("a grass blade tapers to a single vertex at its tip") {

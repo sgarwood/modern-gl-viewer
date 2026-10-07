@@ -285,6 +285,39 @@ public:
         glBindVertexArray(0);
     }
 
+    /// Re-specifies every buffer. Orphaning the old storage rather than
+    /// writing into it lets the driver keep rendering the previous contents
+    /// while the new ones upload, and it copes with the counts changing.
+    void update(const MeshData& mesh) {
+        index_count_ = checked_count(mesh.indices.size());
+        glBindVertexArray(vertex_array_.get());
+        glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_.get());
+        glBufferData(
+            GL_ARRAY_BUFFER,
+            static_cast<GLsizeiptr>(mesh.vertices.size() * sizeof(Vertex)),
+            mesh.vertices.data(),
+            GL_DYNAMIC_DRAW);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, index_buffer_.get());
+        glBufferData(
+            GL_ELEMENT_ARRAY_BUFFER,
+            static_cast<GLsizeiptr>(mesh.indices.size() * sizeof(std::uint32_t)),
+            mesh.indices.data(),
+            GL_DYNAMIC_DRAW);
+
+        static constexpr MeshInstance identity_instance{};
+        const auto* instance_data =
+            mesh.instances.empty() ? &identity_instance : mesh.instances.data();
+        const auto instances = mesh.instance_count();
+        instance_count_ = checked_count(instances);
+        glBindBuffer(GL_ARRAY_BUFFER, instance_buffer_.get());
+        glBufferData(
+            GL_ARRAY_BUFFER,
+            static_cast<GLsizeiptr>(instances * sizeof(MeshInstance)),
+            instance_data,
+            GL_DYNAMIC_DRAW);
+        glBindVertexArray(0);
+    }
+
     [[nodiscard]] GLuint vertex_array() const noexcept { return vertex_array_.get(); }
     [[nodiscard]] GLsizei index_count() const noexcept { return index_count_; }
     [[nodiscard]] GLsizei instance_count() const noexcept { return instance_count_; }
@@ -905,6 +938,16 @@ template <typename Target>
     return *result;
 }
 
+/// The same check for a resource the backend is about to modify.
+template <typename Target>
+[[nodiscard]] Target& mutable_backend_resource(auto& resource, std::string_view kind) {
+    auto* result = dynamic_cast<Target*>(&resource);
+    if (result == nullptr) {
+        throw std::invalid_argument{"Attempted to use a " + std::string{kind} + " from another render backend"};
+    }
+    return *result;
+}
+
 class OpenGlBackend final : public RenderBackend {
 public:
     OpenGlBackend() {
@@ -939,6 +982,11 @@ public:
 
     std::unique_ptr<MeshResource> create_mesh(const MeshData& mesh) override {
         return std::make_unique<OpenGlMesh>(mesh);
+    }
+
+    bool update_mesh(MeshResource& resource, const MeshData& mesh) override {
+        mutable_backend_resource<OpenGlMesh>(resource, "mesh").update(mesh);
+        return true;
     }
 
     std::unique_ptr<RenderPipelineResource> create_pipeline(

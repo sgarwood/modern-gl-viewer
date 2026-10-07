@@ -484,6 +484,10 @@ void Engine::add_foliage_volume(physics::FoliageVolume volume) {
     impl_->physics_world.add_foliage_volume(volume);
 }
 
+bool Engine::update_mesh(EntityId entity, const MeshData& mesh) {
+    return impl_->renderer.update_mesh(impl_->find(entity).renderable, mesh);
+}
+
 void Engine::remove(EntityId entity) {
     const auto found = std::ranges::find(impl_->entities, entity, &EntityRecord::id);
     if (found == impl_->entities.end()) {

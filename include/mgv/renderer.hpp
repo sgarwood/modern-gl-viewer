@@ -53,6 +53,13 @@ public:
     std::vector<RenderableId> set_scene(Scene scene);
     void remove_renderable(RenderableId id);
     void set_renderable_transform(RenderableId id, Transform transform);
+    /// Replaces the geometry behind a renderable, keeping its material,
+    /// transform, and identity. Bounds are recalculated.
+    ///
+    /// Renderables that were given the same mesh share one backend resource,
+    /// so this changes the geometry of every one of them. Returns false if
+    /// the backend cannot update geometry in place.
+    bool update_mesh(RenderableId id, const MeshData& mesh);
     [[nodiscard]] Transform renderable_transform(RenderableId id) const;
     void set_camera(Camera camera) override;
     [[nodiscard]] Camera camera() const override;

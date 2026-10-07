@@ -132,6 +132,14 @@ public:
 
     [[nodiscard]] virtual RenderBackendCapabilities capabilities() const noexcept = 0;
     [[nodiscard]] virtual std::unique_ptr<MeshResource> create_mesh(const MeshData& mesh) = 0;
+    /// Replaces the contents of an existing mesh resource in place.
+    ///
+    /// Streaming terrain rewrites the same few tens of thousands of vertices
+    /// every time the viewer crosses a grid step; rebuilding the scene for
+    /// that would discard every pipeline, texture, and sampler with it.
+    /// Returns false if the backend cannot do this, in which case the caller
+    /// keeps the mesh it has.
+    virtual bool update_mesh(MeshResource&, const MeshData&) { return false; }
     [[nodiscard]] virtual std::unique_ptr<RenderPipelineResource> create_pipeline(
         const RenderPipelineDescriptor& descriptor) = 0;
     [[nodiscard]] virtual std::unique_ptr<TextureResource> create_texture(const ImageData& image) = 0;

@@ -233,97 +233,109 @@ float course_terrain_height(
     return base + blend * surrounding_landscape(x, z);
 }
 
-MeshData make_course_terrain(const CourseTerrainDescription& description) {
-    if (!(description.green_half_extent > 0.0F)) {
-        throw std::invalid_argument{"A course needs a positive green extent"};
+float terrain_inner_step(const TerrainTessellation& tessellation) noexcept {
+    const auto resolution = std::max(tessellation.inner_resolution, 1);
+    return 2.0F * std::max(tessellation.inner_half_extent, 1.0e-3F) /
+           static_cast<float>(resolution);
+}
+
+Vec2 snapped_terrain_centre(const TerrainTessellation& tessellation) noexcept {
+    const auto step = terrain_inner_step(tessellation);
+    return {
+        std::floor(tessellation.centre.x / step) * step,
+        std::floor(tessellation.centre.y / step) * step,
+    };
+}
+
+MeshData make_course_terrain(
+    const CourseTerrainDescription& description,
+    const TerrainTessellation& tessellation) {
+    if (!(tessellation.inner_half_extent > 0.0F)) {
+        throw std::invalid_argument{"Terrain needs a positive inner extent"};
     }
-    if (description.green_resolution < 1) {
-        throw std::invalid_argument{"A course needs at least one quad across the green"};
+    if (tessellation.inner_resolution < 1) {
+        throw std::invalid_argument{"Terrain needs at least one quad across its centre"};
     }
-    if (description.outer_extent <= description.green_half_extent) {
-        throw std::invalid_argument{"A course must extend beyond its green"};
+    if (tessellation.outer_extent <= tessellation.inner_half_extent) {
+        throw std::invalid_argument{"Terrain must extend beyond its centre"};
     }
-    if (description.rings < 1) {
-        throw std::invalid_argument{"A course needs at least one surrounding ring"};
+    if (tessellation.rings < 1) {
+        throw std::invalid_argument{"Terrain needs at least one surrounding ring"};
     }
 
-    const auto resolution = description.green_resolution;
-    const auto per_side = resolution;  // vertices along one edge of a ring, minus the corner
+    const auto centre = snapped_terrain_centre(tessellation);
+    const auto resolution = tessellation.inner_resolution;
+    const auto per_side = resolution;  // vertices along one edge of a loop
     MeshData mesh;
 
-    // --- the green itself ---------------------------------------------------
-    const auto green_half = description.green_half_extent;
-    const auto green_step = (green_half * 2.0F) / static_cast<float>(resolution);
+    // --- the finely tessellated centre --------------------------------------
+    const auto inner_half = tessellation.inner_half_extent;
+    const auto inner_step = terrain_inner_step(tessellation);
     for (int row = 0; row <= resolution; ++row) {
         for (int column = 0; column <= resolution; ++column) {
             mesh.vertices.push_back(terrain_vertex(
-                -green_half + static_cast<float>(column) * green_step,
-                -green_half + static_cast<float>(row) * green_step,
+                centre.x - inner_half + static_cast<float>(column) * inner_step,
+                centre.y - inner_half + static_cast<float>(row) * inner_step,
                 description));
         }
     }
-    const auto green_stride = static_cast<std::uint32_t>(resolution + 1);
+    const auto inner_stride = static_cast<std::uint32_t>(resolution + 1);
     for (int row = 0; row < resolution; ++row) {
         for (int column = 0; column < resolution; ++column) {
-            const auto base = static_cast<std::uint32_t>(row) * green_stride +
+            const auto base = static_cast<std::uint32_t>(row) * inner_stride +
                               static_cast<std::uint32_t>(column);
             mesh.indices.insert(mesh.indices.end(), {
-                base, base + green_stride, base + 1,
-                base + 1, base + green_stride, base + green_stride + 1,
+                base, base + inner_stride, base + 1,
+                base + 1, base + inner_stride, base + inner_stride + 1,
             });
         }
     }
 
     // --- surrounding rings --------------------------------------------------
     // Each ring is a square loop of vertices. Consecutive loops have the same
-    // vertex count, so they can be stitched by index without any T-junctions,
-    // while their spacing grows geometrically and the triangles get larger the
-    // further they are from the player.
+    // vertex count, so they stitch by index with no T-junctions, while their
+    // spacing grows geometrically and the triangles get larger the further
+    // they are from the player.
     const auto loop_vertices = static_cast<std::uint32_t>(4 * per_side);
     const auto growth = std::pow(
-        description.outer_extent / green_half,
-        1.0F / static_cast<float>(description.rings));
+        tessellation.outer_extent / inner_half,
+        1.0F / static_cast<float>(tessellation.rings));
 
-    /// Appends one square loop at the given half-extent, walking the perimeter
-    /// in a consistent direction so loops can be zipped together in order.
+    // Appends one square loop at the given half-extent, walking the perimeter
+    // in a consistent direction so loops zip together in order.
     const auto append_loop = [&](float half) {
         const auto step = (half * 2.0F) / static_cast<float>(per_side);
         for (int i = 0; i < per_side; ++i) {  // -X edge, running +Z
-            mesh.vertices.push_back(
-                terrain_vertex(-half, -half + static_cast<float>(i) * step, description));
+            mesh.vertices.push_back(terrain_vertex(
+                centre.x - half, centre.y - half + static_cast<float>(i) * step, description));
         }
         for (int i = 0; i < per_side; ++i) {  // +Z edge, running +X
-            mesh.vertices.push_back(
-                terrain_vertex(-half + static_cast<float>(i) * step, half, description));
+            mesh.vertices.push_back(terrain_vertex(
+                centre.x - half + static_cast<float>(i) * step, centre.y + half, description));
         }
         for (int i = 0; i < per_side; ++i) {  // +X edge, running -Z
-            mesh.vertices.push_back(
-                terrain_vertex(half, half - static_cast<float>(i) * step, description));
+            mesh.vertices.push_back(terrain_vertex(
+                centre.x + half, centre.y + half - static_cast<float>(i) * step, description));
         }
         for (int i = 0; i < per_side; ++i) {  // -Z edge, running -X
-            mesh.vertices.push_back(
-                terrain_vertex(half - static_cast<float>(i) * step, -half, description));
+            mesh.vertices.push_back(terrain_vertex(
+                centre.x + half - static_cast<float>(i) * step, centre.y - half, description));
         }
     };
 
-    // The first loop sits on the green's own boundary, so the ring mesh begins
-    // exactly where the green ends.
+    // The first loop sits on the centre square's own boundary.
     auto previous_loop = static_cast<std::uint32_t>(mesh.vertices.size());
-    append_loop(green_half);
-    auto half = green_half;
-    for (int ring = 0; ring < description.rings; ++ring) {
-        half = ring + 1 == description.rings ? description.outer_extent : half * growth;
+    append_loop(inner_half);
+    auto half = inner_half;
+    for (int ring = 0; ring < tessellation.rings; ++ring) {
+        half = ring + 1 == tessellation.rings ? tessellation.outer_extent : half * growth;
         const auto current_loop = static_cast<std::uint32_t>(mesh.vertices.size());
         append_loop(half);
         for (std::uint32_t i = 0; i < loop_vertices; ++i) {
             const auto next = (i + 1) % loop_vertices;
-            const auto inner = previous_loop + i;
-            const auto inner_next = previous_loop + next;
-            const auto outer = current_loop + i;
-            const auto outer_next = current_loop + next;
             mesh.indices.insert(mesh.indices.end(), {
-                inner, outer, inner_next,
-                inner_next, outer, outer_next,
+                previous_loop + i, current_loop + i, previous_loop + next,
+                previous_loop + next, current_loop + i, current_loop + next,
             });
         }
         previous_loop = current_loop;

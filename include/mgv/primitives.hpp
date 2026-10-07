@@ -13,25 +13,40 @@ namespace mgv {
 /// inwards, towards the eye at the centre.
 [[nodiscard]] MeshData make_sky_dome(float radius, int rings, int sectors);
 
-/// The shape of a hole: a tightly tessellated putting surface surrounded by
-/// progressively coarser rings of landscape running out to the horizon.
+/// Where the course's features are. This is the hole itself, fixed in the
+/// world, and it is what `course_terrain_height` and `course_surface_class`
+/// are expressed in terms of.
 struct CourseTerrainDescription final {
     /// Half the width of the mown green, in metres.
     float green_half_extent{7.62F};
-    /// Quads per side across the green. Its undulation is around a tenth of a
-    /// metre, so this has to stay fine.
-    int green_resolution{100};
-    /// Half the width of the whole terrain, in metres.
-    float outer_extent{420.0F};
-    /// Concentric rings between the green and the outer edge. Each is a fixed
-    /// fraction wider than the last, so triangle density falls off with
-    /// distance while staying fine enough near the player that the ground
-    /// does not visibly facet.
-    int rings{52};
-    /// Half-width of the mown approach running away from the green, in metres.
+    /// Half-width of the mown approach running away from the green.
     float approach_half_width{17.0F};
     /// How far the approach runs before it gives way to rough, in metres.
     float approach_length{190.0F};
+};
+
+/// How finely the terrain is cut up for drawing, and where that detail sits.
+///
+/// Separate from the course itself, because the two are anchored to
+/// different things: the hole stays where it is, while the detail has to
+/// follow the player. Nested square loops coarsening outwards is the
+/// structure of a geometry clipmap, and consecutive loops here carry the
+/// same vertex count, so it is watertight with no T-junctions to stitch.
+struct TerrainTessellation final {
+    /// Where the detail is centred, in the ground plane. Snapped internally.
+    Vec2 centre{};
+    /// Half the width of the finely tessellated square at the centre.
+    float inner_half_extent{9.0F};
+    /// Quads per side across that square. A green undulates by around a
+    /// tenth of a metre, so this has to stay fine enough to putt on.
+    int inner_resolution{96};
+    /// Half the width of the whole terrain, in metres.
+    float outer_extent{420.0F};
+    /// Concentric loops between the centre and the outer edge. Each is a
+    /// fixed fraction wider than the last, so triangle density falls off
+    /// with distance while staying fine enough near the player that the
+    /// ground does not visibly facet.
+    int rings{52};
 };
 
 /// How a point on the course is cut, stored per vertex.
@@ -63,6 +78,17 @@ struct SurfaceClass final {
     float z,
     const CourseTerrainDescription& description) noexcept;
 
+/// The spacing of the innermost grid, in metres.
+[[nodiscard]] float terrain_inner_step(const TerrainTessellation& tessellation) noexcept;
+
+/// The centre a tessellation will actually be built at.
+///
+/// Snapped to whole steps of the innermost grid. Without that the sampling
+/// grid slides continuously under the terrain as the viewer walks, and every
+/// feature finer than a grid cell crawls -- the same reason a shadow map's
+/// volume is snapped to its texels.
+[[nodiscard]] Vec2 snapped_terrain_centre(const TerrainTessellation& tessellation) noexcept;
+
 /// The terrain height at a point, in metres.
 ///
 /// Inside the green this is exactly the analytic surface the physics
@@ -74,8 +100,11 @@ struct SurfaceClass final {
     float z,
     const CourseTerrainDescription& description) noexcept;
 
-/// Builds the hole described by `description` as a single watertight mesh.
-[[nodiscard]] MeshData make_course_terrain(const CourseTerrainDescription& description);
+/// Builds the terrain as a single watertight mesh, with its detail centred
+/// where the tessellation asks.
+[[nodiscard]] MeshData make_course_terrain(
+    const CourseTerrainDescription& description,
+    const TerrainTessellation& tessellation);
 
 /// Builds a tapered cylinder standing on the origin along +Y, capped at both
 /// ends. `tex_coord.y` runs 0 at the base to 1 at the top.

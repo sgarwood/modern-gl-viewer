@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <vector>
 #include "mgv/primitives.hpp"
@@ -192,7 +193,7 @@ struct TreePlacement final {
 
 } // namespace
 
-EntityId configure_course_session(Engine& engine, const CourseSessionDescription& description) {
+CourseSession configure_course_session(Engine& engine, const CourseSessionDescription& description) {
     const auto& shaders = description.assets.shader_directory;
 
     // The dome is drawn around the eye by its vertex shader, so its depth
@@ -221,8 +222,11 @@ EntityId configure_course_session(Engine& engine, const CourseSessionDescription
     // world in shadow.
     sky.set_casts_shadow(false);
     scene.add(std::move(sky));
+    auto tessellation = description.tessellation;
+    tessellation.centre = description.viewpoint.position;
+    const auto terrain_index = scene.size();
     scene.add(Renderable{
-        std::make_shared<const MeshData>(make_course_terrain(description.terrain)),
+        std::make_shared<const MeshData>(make_course_terrain(description.terrain, tessellation)),
         instance_of(turf_material),
     });
     auto prop_pipeline = load_material(shaders, "prop")->pipeline();
@@ -351,10 +355,12 @@ EntityId configure_course_session(Engine& engine, const CourseSessionDescription
     const auto grass_material = std::make_shared<const Material>(std::move(grass_pipeline));
 
     auto grass_field = description.grass;
+    std::optional<std::size_t> grass_index;
     if (grass_field.radius > 0.0F && grass_field.density > 0.0F) {
         if (grass_field.centre == Vec2{}) {
             grass_field.centre = description.ball_start;
         }
+        grass_index = scene.size();
         Renderable grass{
             std::make_shared<const MeshData>(make_grass_field(grass_field, description.terrain)),
             instance_of(grass_material),
@@ -450,7 +456,53 @@ EntityId configure_course_session(Engine& engine, const CourseSessionDescription
     engine.set_camera(std::move(camera));
     engine.set_environment(description.environment);
 
-    return ball;
+    return {
+        .ball = ball,
+        .terrain = entities[terrain_index],
+        .grass = grass_index ? std::optional<EntityId>{entities[*grass_index]} : std::nullopt,
+        .terrain_centre = snapped_terrain_centre(tessellation),
+        .grass_centre = grass_field.centre,
+    };
+}
+
+bool stream_course(
+    Engine& engine,
+    CourseSession& session,
+    const CourseSessionDescription& description) {
+    const auto eye = engine.camera().position();
+    const Vec2 ground{eye.x, eye.z};
+    auto rebuilt = false;
+
+    auto tessellation = description.tessellation;
+    tessellation.centre = ground;
+    const auto wanted = snapped_terrain_centre(tessellation);
+    if (wanted != session.terrain_centre) {
+        if (engine.update_mesh(
+                session.terrain, make_course_terrain(description.terrain, tessellation))) {
+            session.terrain_centre = wanted;
+            rebuilt = true;
+        }
+    }
+
+    if (session.grass && description.grass.radius > 0.0F && description.grass.density > 0.0F) {
+        // Blades are rebuilt far less often than the terrain: scattering a
+        // hundred thousand of them is the expensive half, and the field is
+        // wide enough that it need only move once the camera has crossed a
+        // good part of it.
+        const auto moved_x = ground.x - session.grass_centre.x;
+        const auto moved_z = ground.y - session.grass_centre.y;
+        const auto threshold = description.grass.radius * 0.35F;
+        if (moved_x * moved_x + moved_z * moved_z > threshold * threshold) {
+            auto field = description.grass;
+            field.centre = ground;
+            if (engine.update_mesh(*session.grass, make_grass_field(field, description.terrain))) {
+                session.grass_centre = ground;
+                rebuilt = true;
+            }
+        }
+    }
+
+    return rebuilt;
 }
 
 CourseSessionDescription default_course_session(const std::filesystem::path& asset_directory) {
@@ -474,6 +526,7 @@ CourseSessionDescription default_course_session(const std::filesystem::path& ass
             .shader_directory = asset_directory / "shaders",
         },
         .terrain = {},
+        .tessellation = {},
         .collision = {},
         .grass = {},
         .litter = {},

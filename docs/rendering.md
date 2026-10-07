@@ -109,12 +109,7 @@ in number and in height towards its rim, or it ends in a visible ring.
 Blades do not cast into the shadow map: a hundred thousand of them would spend
 the whole map on detail finer than one of its texels.
 
-The field is static and centred on the ball. Patches that follow the camera,
-regenerated as the player walks, are the next step and are what this needs to
-become before the hike is playable. The same applies to the terrain: its
-rings are concentric square loops coarsening outwards, which is the structure
-of a geometry clipmap, but centred on the green rather than on the viewer. A
-clipmap proper translates with the camera and snaps to whole grid steps.
+The field follows the camera: see **Streaming** below.
 
 ## Trees and litter
 
@@ -156,6 +151,47 @@ of each mound rather than tiling its surface, so a ball dropped into a drift
 is genuinely among them. Each leaf carries how deep it lies, which is what
 lets the shader darken the ones underneath, and the count thins towards the
 rim as well as the depth, or the drift ends on a hard circle.
+
+## Streaming
+
+The terrain and the blade field are both built around a centre, and both
+follow the camera.
+
+Course **layout** and mesh **tessellation** are separate descriptions, because
+they are anchored to different things. `CourseTerrainDescription` says where
+the green and the approach are, and the hole stays where it is;
+`TerrainTessellation` says how finely the ground is cut up and where that
+detail sits, and the detail has to travel with the player.
+
+The tessellation is nested square loops coarsening outwards, which is the
+structure of a geometry clipmap. Consecutive loops carry the same vertex
+count, so it is watertight by construction with no T-junctions to stitch, and
+the topology does not depend on where it is centred -- which is what lets one
+mesh replace another in place.
+
+Its centre is snapped to whole steps of the innermost grid. Without that the
+sampling grid slides continuously under the terrain as the viewer walks and
+every feature finer than a cell crawls, for the same reason a shadow map's
+volume is snapped to its texels.
+
+`stream_course` moves both and rebuilds what has moved. The terrain only
+moves on whole grid steps, so a camera drifting inside one cell costs a
+comparison. The blade field moves on a third of its own radius, because
+scattering a hundred thousand blades is the expensive half.
+
+Frontends call it before each tick. `mgv_capture --walk <metres>` advances the
+camera along its view direction each frame, which exercises the whole path and
+reports how many frames rebuilt.
+
+Two limits worth knowing:
+
+- Rebuilding is synchronous. On this software rasteriser it disappears into
+  the frame time, but a full blade-field rebuild is around a tenth of a second
+  and that would be the frame budget on real hardware. It belongs on a worker
+  thread, or split across frames, before anything ships.
+- The collision heightmap does **not** stream. It covers a fixed corridor of
+  play; a ball driven outside it falls to the backstop. Walking the whole
+  course needs that to follow the player too.
 
 ## Filtering
 
