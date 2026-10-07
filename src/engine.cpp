@@ -1,5 +1,3 @@
-#include <vector>
-std::vector<float> g_ball_trail;
 #include <cmath>
 #include <iostream>
 #include <mutex>
@@ -30,11 +28,6 @@ enum class GameState {
 struct PathfindingNode {
     Vec3 pos;
 };
-
-
-// Global trail points for shader hack
-#include <vector>
-std::vector<float> g_ball_trail;
 
 
 namespace {
@@ -314,6 +307,34 @@ void drain_commands() {
         }
     }
 
+    /// Appends the current ball position to the wet-turf trail once it has
+    /// travelled far enough horizontally to be worth a new sample, keeping the
+    /// buffer within the fixed length the terrain shader declares.
+    void record_wet_trail() {
+        for (const auto& entity : entities) {
+            if (!entity.body) {
+                continue;
+            }
+            const auto& body = physics_world.body(*entity.body);
+            if (body.motion() != physics::MotionType::dynamic) {
+                continue;
+            }
+            const auto position = body.position().metres();
+            if (!wet_trail.empty()) {
+                const auto& previous = wet_trail.back();
+                const auto moved = std::abs(previous.x - position.x) > wet_trail_spacing ||
+                                   std::abs(previous.z - position.z) > wet_trail_spacing;
+                if (!moved) {
+                    continue;
+                }
+            }
+            wet_trail.push_back(position);
+            if (wet_trail.size() > max_wet_trail_points) {
+                wet_trail.erase(wet_trail.begin());
+            }
+        }
+    }
+
     void synchronize_animation() {
         for (auto& entity : entities) {
             if (!entity.animation_player) {
@@ -352,6 +373,9 @@ void drain_commands() {
     std::optional<EntityId> active_ball;
     std::unique_ptr<hardware::LaunchMonitor> launch_monitor;
 
+    static constexpr std::size_t max_wet_trail_points{32};
+    static constexpr float wet_trail_spacing{0.05F};
+    std::vector<Vec3> wet_trail;
 };
 
 Engine::Engine(std::unique_ptr<RenderBackend> backend)
@@ -610,23 +634,7 @@ void Engine::tick(Viewport viewport) {
     impl_->physics_world.simulate(physics::Duration{elapsed});
     impl_->synchronize_physics();
 
-    // Store trail
-    for (auto& entity : impl_->entities) {
-        if (entity.body) {
-            auto& rb = impl_->physics_world.body(*entity.body);
-            if (rb.motion() == physics::MotionType::dynamic) {
-                auto p = rb.position().metres();
-                if (g_ball_trail.empty() || std::abs(g_ball_trail[g_ball_trail.size()-3] - p.x) > 0.05f || std::abs(g_ball_trail[g_ball_trail.size()-1] - p.z) > 0.05f) {
-                    g_ball_trail.push_back(p.x);
-                    g_ball_trail.push_back(p.y);
-                    g_ball_trail.push_back(p.z);
-                    if (g_ball_trail.size() > 32 * 3) {
-                        g_ball_trail.erase(g_ball_trail.begin(), g_ball_trail.begin() + 3);
-                    }
-                }
-            }
-        }
-    }
+    impl_->record_wet_trail();
 
 
     if (impl_->is_range_finder_active_) {
@@ -652,6 +660,7 @@ void Engine::tick(Viewport viewport) {
         .framebuffer_width = viewport.framebuffer_width,
         .framebuffer_height = viewport.framebuffer_height,
         .elapsed_seconds = total_elapsed,
+        .wet_trail = impl_->wet_trail,
     });
 }
 
@@ -671,6 +680,18 @@ animation::PlaybackState Engine::animation_state(
 
 Camera Engine::camera() const {
     return impl_->renderer.camera();
+}
+
+void Engine::set_camera(Camera camera) {
+    impl_->renderer.set_camera(std::move(camera));
+}
+
+void Engine::set_environment(Environment environment) {
+    impl_->renderer.set_environment(std::move(environment));
+}
+
+Environment Engine::environment() const {
+    return impl_->renderer.environment();
 }
 
 RenderStatistics Engine::last_frame_statistics() const noexcept {

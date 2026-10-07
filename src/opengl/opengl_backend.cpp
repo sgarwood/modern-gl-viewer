@@ -1,17 +1,18 @@
-#include <vector>
-extern std::vector<float> g_ball_trail;
 #include "mgv/opengl_backend.hpp"
 
 #include <glad/gl.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace mgv {
 namespace {
@@ -362,6 +363,62 @@ private:
     SamplerName name_;
 };
 
+/// The uniforms every mgv shader may declare. A shader that omits one simply
+/// does not receive it, which keeps the minimal viewer shaders valid.
+enum class StandardUniform : std::size_t {
+    model,
+    normal_matrix,
+    view,
+    projection,
+    view_projection,
+    camera_position,
+    time,
+    sun_direction,
+    sun_color,
+    sun_illuminance,
+    sky_zenith_color,
+    sky_horizon_color,
+    ground_albedo,
+    sky_illuminance,
+    turbidity,
+    fog_density,
+    fog_height_falloff,
+    exposure,
+    wind_speed,
+    wind_direction,
+    surface_wetness,
+    viewport_size,
+    trail_count,
+    trail_positions,
+};
+
+constexpr std::array standard_uniform_names{
+    "uModel",
+    "uNormalMatrix",
+    "uView",
+    "uProjection",
+    "uViewProjection",
+    "uCameraPosition",
+    "uTime",
+    "uSunDirection",
+    "uSunColor",
+    "uSunIlluminance",
+    "uSkyZenithColor",
+    "uSkyHorizonColor",
+    "uGroundAlbedo",
+    "uSkyIlluminance",
+    "uTurbidity",
+    "uFogDensity",
+    "uFogHeightFalloff",
+    "uExposure",
+    "uWindSpeed",
+    "uWindDirection",
+    "uSurfaceWetness",
+    "uViewportSize",
+    "uTrailCount",
+    "uTrailPositions",
+};
+
 class OpenGlPipeline final : public RenderPipelineResource {
 public:
     explicit OpenGlPipeline(const RenderPipelineDescriptor& descriptor)
@@ -384,10 +441,32 @@ public:
             throw std::runtime_error{"Shader link failed:\n" + program_log(program_.get())};
         }
         mvp_location_ = glGetUniformLocation(program_.get(), "uMvp");
+        for (std::size_t index = 0; index < standard_uniform_names.size(); ++index) {
+            standard_uniforms_[index] =
+                glGetUniformLocation(program_.get(), standard_uniform_names[index]);
+        }
     }
 
     [[nodiscard]] GLuint program() const noexcept { return program_.get(); }
     [[nodiscard]] GLint mvp_location() const noexcept { return mvp_location_; }
+
+    /// Returns the cached location of a standard uniform, or -1 when the shader
+    /// does not declare it. Shaders are free to use any subset.
+    [[nodiscard]] GLint standard_uniform(StandardUniform uniform) const noexcept {
+        return standard_uniforms_[static_cast<std::size_t>(uniform)];
+    }
+
+    /// Resolves a material-supplied binding name, caching the lookup so a
+    /// repeated texture or colour name costs one hash probe per draw.
+    [[nodiscard]] GLint named_uniform(const std::string& name) const {
+        const auto cached = named_uniforms_.find(name);
+        if (cached != named_uniforms_.end()) {
+            return cached->second;
+        }
+        const auto location = glGetUniformLocation(program_.get(), name.c_str());
+        named_uniforms_.emplace(name, location);
+        return location;
+    }
     [[nodiscard]] PrimitiveTopology topology() const noexcept { return topology_; }
     [[nodiscard]] const RasterizationState& rasterization() const noexcept { return rasterization_; }
     [[nodiscard]] const DepthState& depth() const noexcept { return depth_; }
@@ -396,6 +475,8 @@ public:
 private:
     Program program_;
     GLint mvp_location_{-1};
+    std::array<GLint, standard_uniform_names.size()> standard_uniforms_{};
+    mutable std::unordered_map<std::string, GLint> named_uniforms_;
     PrimitiveTopology topology_;
     RasterizationState rasterization_;
     DepthState depth_;
@@ -448,10 +529,82 @@ public:
     }
 
     void begin_frame(const Frame& frame) override {
+        frame_ = frame;
+        trail_.clear();
+        trail_.reserve(frame.wet_trail.size() * 3);
+        for (const auto& point : frame.wet_trail) {
+            trail_.push_back(point.x);
+            trail_.push_back(point.y);
+            trail_.push_back(point.z);
+        }
         glViewport(0, 0, frame.framebuffer_width, frame.framebuffer_height);
         glDepthMask(GL_TRUE);
         glClearColor(0.025F, 0.035F, 0.055F, 1.0F);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    }
+
+    /// Uploads whichever standard uniforms `pipeline` declares. Called once per
+    /// draw because the active program changes between pipelines.
+    void upload_standard_uniforms(const OpenGlPipeline& pipeline, const DrawPacket& packet) const {
+        const auto& environment = frame_.environment;
+        const auto matrix = [&pipeline](StandardUniform uniform, const Mat4& value) {
+            const auto location = pipeline.standard_uniform(uniform);
+            if (location >= 0) {
+                glUniformMatrix4fv(location, 1, GL_FALSE, value.data());
+            }
+        };
+        const auto vector3 = [&pipeline](StandardUniform uniform, const Vec3& value) {
+            const auto location = pipeline.standard_uniform(uniform);
+            if (location >= 0) {
+                glUniform3f(location, value.x, value.y, value.z);
+            }
+        };
+        const auto scalar = [&pipeline](StandardUniform uniform, float value) {
+            const auto location = pipeline.standard_uniform(uniform);
+            if (location >= 0) {
+                glUniform1f(location, value);
+            }
+        };
+
+        matrix(StandardUniform::model, packet.model);
+        matrix(StandardUniform::normal_matrix, packet.normal_matrix);
+        matrix(StandardUniform::view, frame_.view);
+        matrix(StandardUniform::projection, frame_.projection);
+        matrix(StandardUniform::view_projection, frame_.view_projection);
+        vector3(StandardUniform::camera_position, frame_.camera_position);
+        scalar(StandardUniform::time, frame_.elapsed_seconds);
+        vector3(StandardUniform::sun_direction, environment.sun.direction);
+        vector3(StandardUniform::sun_color, environment.sun.color);
+        scalar(StandardUniform::sun_illuminance, environment.sun.illuminance);
+        vector3(StandardUniform::sky_zenith_color, environment.sky_zenith_color);
+        vector3(StandardUniform::sky_horizon_color, environment.sky_horizon_color);
+        vector3(StandardUniform::ground_albedo, environment.ground_albedo);
+        scalar(StandardUniform::sky_illuminance, environment.sky_illuminance);
+        scalar(StandardUniform::turbidity, environment.turbidity);
+        scalar(StandardUniform::fog_density, environment.fog_density);
+        scalar(StandardUniform::fog_height_falloff, environment.fog_height_falloff);
+        scalar(StandardUniform::exposure, environment.exposure);
+        scalar(StandardUniform::wind_speed, environment.wind_speed);
+        scalar(StandardUniform::wind_direction, environment.wind_direction_radians);
+        scalar(StandardUniform::surface_wetness, environment.surface_wetness);
+
+        const auto viewport_location = pipeline.standard_uniform(StandardUniform::viewport_size);
+        if (viewport_location >= 0) {
+            glUniform2f(
+                viewport_location,
+                static_cast<float>(frame_.framebuffer_width),
+                static_cast<float>(frame_.framebuffer_height));
+        }
+
+        const auto count_location = pipeline.standard_uniform(StandardUniform::trail_count);
+        const auto point_count = static_cast<GLsizei>(trail_.size() / 3);
+        if (count_location >= 0) {
+            glUniform1i(count_location, point_count);
+        }
+        const auto trail_location = pipeline.standard_uniform(StandardUniform::trail_positions);
+        if (trail_location >= 0 && point_count > 0) {
+            glUniform3fv(trail_location, point_count, trail_.data());
+        }
     }
 
     void draw(const DrawPacket& packet) override {
@@ -492,8 +645,9 @@ public:
                 GL_FALSE,
                 packet.model_view_projection.data());
         }
+        upload_standard_uniforms(pipeline, packet);
         for (const auto& binding : packet.colors) {
-            const auto location = glGetUniformLocation(pipeline.program(), binding.name.c_str());
+            const auto location = pipeline.named_uniform(binding.name);
             if (location >= 0) {
                 glUniform4f(location, binding.value.x, binding.value.y, binding.value.z, binding.value.w);
             }
@@ -512,22 +666,11 @@ public:
             glActiveTexture(GL_TEXTURE0 + unit);
             glBindTexture(GL_TEXTURE_2D, texture.name());
             glBindSampler(static_cast<GLuint>(index), sampler.name());
-            const auto location = glGetUniformLocation(pipeline.program(), binding.name.c_str());
+            const auto location = pipeline.named_uniform(binding.name);
             if (location >= 0) {
                 glUniform1i(location, static_cast<GLint>(index));
             }
         }
-        
-        
-        auto loc_count = glGetUniformLocation(pipeline.program(), "uTrailCount");
-        if (loc_count >= 0) {
-            glUniform1i(loc_count, g_ball_trail.size() / 3);
-        }
-        auto loc_points = glGetUniformLocation(pipeline.program(), "uTrailPositions");
-        if (loc_points >= 0 && !g_ball_trail.empty()) {
-            glUniform3fv(loc_points, g_ball_trail.size() / 3, g_ball_trail.data());
-        }
-
         glBindVertexArray(gl_mesh.vertex_array());
         glDrawElements(
             primitive_topology(pipeline.topology()),
@@ -547,6 +690,8 @@ public:
 
 private:
     std::uint32_t max_sampled_textures_{};
+    Frame frame_;
+    std::vector<float> trail_;
 };
 
 } // namespace

@@ -74,6 +74,7 @@ add_library(mgv_core
     src/camera.cpp
     src/camera_controller.cpp
     src/image_loader.cpp
+    src/lighting.cpp
     src/material.cpp
     src/obj_loader.cpp
     src/renderer.cpp
@@ -360,6 +361,7 @@ if(BUILD_TESTING)
         tests/engine_test.cpp
         tests/golf/shot_model_test.cpp
         tests/image_loader_test.cpp
+        tests/lighting_test.cpp
         tests/obj_loader_test.cpp
         tests/network/datagram_test.cpp
         tests/network/network_service_test.cpp

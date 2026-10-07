@@ -173,6 +173,9 @@ public:
     [[nodiscard]] animation::PlaybackState animation_state(
         animation::AnimationPlayerId player) const;
     [[nodiscard]] Camera camera() const;
+    void set_camera(Camera camera);
+    void set_environment(Environment environment);
+    [[nodiscard]] Environment environment() const;
     [[nodiscard]] RenderStatistics last_frame_statistics() const noexcept;
 
 private:

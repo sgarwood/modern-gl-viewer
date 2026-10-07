@@ -1,7 +1,9 @@
 #include "mgv/renderer.hpp"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
@@ -30,7 +32,24 @@ struct Calls final {
     std::vector<mgv::Vec4> colors;
     std::vector<float> draw_markers;
     std::vector<mgv::Mat4> transforms;
+    std::vector<mgv::Mat4> models;
+    std::vector<mgv::Mat4> normal_matrices;
+    std::vector<mgv::Mat4> frame_views;
+    std::vector<mgv::Mat4> frame_projections;
+    std::vector<mgv::Mat4> frame_view_projections;
+    std::vector<mgv::Vec3> frame_camera_positions;
+    std::vector<mgv::Environment> frame_environments;
+    std::vector<std::size_t> frame_trail_sizes;
 };
+
+[[nodiscard]] mgv::MeshData unit_triangle() {
+    return {
+        .vertices = {{{0, 0, 0}, {0, 0, 1}, {0, 0}},
+                     {{1, 0, 0}, {0, 0, 1}, {1, 0}},
+                     {{0, 1, 0}, {0, 0, 1}, {0, 1}}},
+        .indices = {0, 1, 2},
+    };
+}
 
 class FakeMesh final : public mgv::MeshResource {};
 class FakePipeline final : public mgv::RenderPipelineResource {};
@@ -75,10 +94,20 @@ public:
         }
         return std::make_unique<FakeSampler>();
     }
-    void begin_frame(const mgv::Frame&) override { ++calls_.begins; }
+    void begin_frame(const mgv::Frame& frame) override {
+        ++calls_.begins;
+        calls_.frame_views.push_back(frame.view);
+        calls_.frame_projections.push_back(frame.projection);
+        calls_.frame_view_projections.push_back(frame.view_projection);
+        calls_.frame_camera_positions.push_back(frame.camera_position);
+        calls_.frame_environments.push_back(frame.environment);
+        calls_.frame_trail_sizes.push_back(frame.wet_trail.size());
+    }
     void draw(const mgv::DrawPacket& packet) override {
         ++calls_.draws;
         calls_.transforms.push_back(packet.model_view_projection);
+        calls_.models.push_back(packet.model);
+        calls_.normal_matrices.push_back(packet.normal_matrix);
         for (const auto& binding : packet.textures) {
             REQUIRE(binding.texture != nullptr);
             REQUIRE(binding.sampler != nullptr);
@@ -578,4 +607,105 @@ TEST_CASE("failed scene preparation leaves the previous scene renderable") {
     CHECK(calls.draws == 1);
     CHECK(calls.begins == 1);
     CHECK(calls.ends == 1);
+}
+
+TEST_CASE("renderer publishes the camera matrices and position for the frame") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    renderer.load(unit_triangle(), {"vertex", "fragment", "test.vert", "test.frag"});
+    mgv::Camera camera;
+    camera.look_at({3.0F, 4.0F, 5.0F}, {0.0F, 1.0F, 0.0F});
+    camera.set_perspective(50.0F, 0.25F, 500.0F);
+    renderer.set_camera(camera);
+
+    renderer.render({.framebuffer_width = 800, .framebuffer_height = 400});
+
+    REQUIRE(calls.frame_camera_positions.size() == 1);
+    CHECK(calls.frame_camera_positions.front() == mgv::Vec3{3.0F, 4.0F, 5.0F});
+
+    const auto expected_view = camera.view_matrix();
+    const auto expected_projection = camera.projection_matrix(2.0F);
+    const auto expected_view_projection = camera.view_projection_matrix(2.0F);
+    CHECK(calls.frame_views.front() == expected_view);
+    CHECK(calls.frame_projections.front() == expected_projection);
+    CHECK(calls.frame_view_projections.front() == expected_view_projection);
+}
+
+TEST_CASE("renderer forwards its environment to every frame") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    renderer.load(unit_triangle(), {"vertex", "fragment", "test.vert", "test.frag"});
+
+    mgv::Environment environment;
+    environment.sun.direction = {0.0F, 4.0F, 3.0F};
+    environment.sun.illuminance = 1234.0F;
+    environment.exposure = 0.25F;
+    environment.fog_density = 0.02F;
+    renderer.set_environment(environment);
+
+    renderer.render({.framebuffer_width = 320, .framebuffer_height = 240});
+
+    REQUIRE(calls.frame_environments.size() == 1);
+    const auto& published = calls.frame_environments.front();
+    CHECK(published.sun.illuminance == 1234.0F);
+    CHECK(published.exposure == 0.25F);
+    CHECK(published.fog_density == 0.02F);
+    SECTION("the sun direction is normalized before it reaches the backend") {
+        CHECK(published.sun.direction.y == Catch::Approx(0.8F));
+        CHECK(published.sun.direction.z == Catch::Approx(0.6F));
+    }
+    CHECK(renderer.environment().sun.illuminance == 1234.0F);
+}
+
+TEST_CASE("renderer submits a world transform and a normal matrix per draw") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    const auto ids = renderer.load(unit_triangle(), {"vertex", "fragment", "test.vert", "test.frag"});
+    REQUIRE(ids.size() == 1);
+
+    mgv::Transform transform;
+    transform.set_position({2.0F, 3.0F, 4.0F}).set_scale({2.0F, 4.0F, 8.0F});
+    renderer.set_renderable_transform(ids.front(), transform);
+    mgv::Camera camera;
+    camera.look_at({2.0F, 3.0F, 40.0F}, {2.0F, 3.0F, 4.0F});
+    camera.set_perspective(60.0F, 0.1F, 500.0F);
+    renderer.set_camera(camera);
+
+    renderer.render({.framebuffer_width = 100, .framebuffer_height = 100});
+
+    REQUIRE(calls.models.size() == 1);
+    const auto& model = calls.models.front();
+    CHECK(model == transform.matrix());
+    CHECK(model[12] == 2.0F);
+    CHECK(model[13] == 3.0F);
+    CHECK(model[14] == 4.0F);
+
+    REQUIRE(calls.normal_matrices.size() == 1);
+    const auto& normal = calls.normal_matrices.front();
+    SECTION("non-uniform scale is inverted so normals stay perpendicular") {
+        CHECK(normal[0] == Catch::Approx(0.5F));
+        CHECK(normal[5] == Catch::Approx(0.25F));
+        CHECK(normal[10] == Catch::Approx(0.125F));
+    }
+    SECTION("the normal matrix discards translation") {
+        CHECK(normal[12] == Catch::Approx(0.0F));
+        CHECK(normal[13] == Catch::Approx(0.0F));
+        CHECK(normal[14] == Catch::Approx(0.0F));
+    }
+}
+
+TEST_CASE("renderer forwards the wet trail it was given for the frame") {
+    Calls calls;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls)};
+    renderer.load(unit_triangle(), {"vertex", "fragment", "test.vert", "test.frag"});
+
+    const std::vector<mgv::Vec3> trail{{0.0F, 0.0F, 0.0F}, {1.0F, 0.0F, 1.0F}};
+    renderer.render({
+        .framebuffer_width = 100,
+        .framebuffer_height = 100,
+        .wet_trail = trail,
+    });
+
+    REQUIRE(calls.frame_trail_sizes.size() == 1);
+    CHECK(calls.frame_trail_sizes.front() == 2);
 }

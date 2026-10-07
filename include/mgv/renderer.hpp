@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mgv/camera_target.hpp"
+#include "mgv/lighting.hpp"
 #include "mgv/render_backend.hpp"
 #include "mgv/scene.hpp"
 
@@ -44,6 +45,9 @@ public:
     [[nodiscard]] Transform renderable_transform(RenderableId id) const;
     void set_camera(Camera camera) override;
     [[nodiscard]] Camera camera() const override;
+    /// Replaces the sky, sun and fog state shared by every subsequent frame.
+    void set_environment(Environment environment);
+    [[nodiscard]] Environment environment() const;
     void render(const Frame& frame);
     [[nodiscard]] RenderStatistics last_frame_statistics() const noexcept;
 

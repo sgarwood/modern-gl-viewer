@@ -2,6 +2,7 @@
 
 #include "mgv/camera.hpp"
 #include "mgv/clip_space.hpp"
+#include "mgv/lighting.hpp"
 #include "mgv/mesh.hpp"
 #include "mgv/render_pipeline.hpp"
 #include "mgv/texture.hpp"
@@ -13,10 +14,33 @@
 
 namespace mgv {
 
+/// The identity matrix in the column-major layout shared by `Camera` and
+/// `Transform`.
+inline constexpr Mat4 identity_matrix{
+    1.0F, 0.0F, 0.0F, 0.0F,
+    0.0F, 1.0F, 0.0F, 0.0F,
+    0.0F, 0.0F, 1.0F, 0.0F,
+    0.0F, 0.0F, 0.0F, 1.0F,
+};
+
+/// Everything a backend needs that is constant for the whole frame.
+///
+/// Frontends fill in only the viewport; `Renderer` derives the camera
+/// matrices, resolves the environment, and hands the completed frame to
+/// `RenderBackend::begin_frame`. Shaders therefore never recover world-space
+/// quantities from a model-view-projection matrix.
 struct Frame final {
     int framebuffer_width{1};
     int framebuffer_height{1};
     float elapsed_seconds{};
+    Mat4 view{identity_matrix};
+    Mat4 projection{identity_matrix};
+    Mat4 view_projection{identity_matrix};
+    Vec3 camera_position{};
+    Environment environment{};
+    /// World-space points where the ball has recently rolled, used to dry a
+    /// track into wet turf. Owned by the caller for the duration of the frame.
+    std::span<const Vec3> wet_trail{};
 };
 
 class MeshResource {
@@ -82,6 +106,11 @@ struct DrawPacket final {
     const MeshResource& mesh;
     const RenderPipelineResource& pipeline;
     Mat4 model_view_projection;
+    /// Object-to-world transform, so shaders can light in world space.
+    Mat4 model{identity_matrix};
+    /// Inverse transpose of `model`, in the upper-left 3x3 block, which keeps
+    /// normals perpendicular under non-uniform scale.
+    Mat4 normal_matrix{identity_matrix};
     std::span<const SampledTextureBinding> textures;
     std::span<const ColorBinding> colors;
 };

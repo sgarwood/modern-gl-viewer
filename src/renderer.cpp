@@ -27,6 +27,41 @@ namespace {
     return result;
 }
 
+/// Returns the inverse transpose of the upper-left 3x3 block of `model`, so
+/// normals survive non-uniform scale. Translation is dropped and a singular
+/// basis degrades to the identity rather than producing infinities.
+[[nodiscard]] Mat4 normal_matrix_of(const Mat4& model) {
+    const auto m = [&model](std::size_t column, std::size_t row) {
+        return model[column * 4 + row];
+    };
+    const auto cofactor00 = m(1, 1) * m(2, 2) - m(2, 1) * m(1, 2);
+    const auto cofactor01 = m(2, 1) * m(0, 2) - m(0, 1) * m(2, 2);
+    const auto cofactor02 = m(0, 1) * m(1, 2) - m(1, 1) * m(0, 2);
+    const auto determinant = m(0, 0) * cofactor00 + m(1, 0) * cofactor01 + m(2, 0) * cofactor02;
+    if (std::abs(determinant) < 1.0e-12F) {
+        return identity_matrix;
+    }
+    const auto inverse_determinant = 1.0F / determinant;
+
+    // The inverse of the 3x3 basis is the adjugate over the determinant; the
+    // transpose of that inverse is the adjugate's transpose, which is the
+    // cofactor matrix laid out column by column.
+    Mat4 result{identity_matrix};
+    const auto set = [&result](std::size_t column, std::size_t row, float value) {
+        result[column * 4 + row] = value;
+    };
+    set(0, 0, cofactor00 * inverse_determinant);
+    set(0, 1, cofactor01 * inverse_determinant);
+    set(0, 2, cofactor02 * inverse_determinant);
+    set(1, 0, (m(2, 0) * m(1, 2) - m(1, 0) * m(2, 2)) * inverse_determinant);
+    set(1, 1, (m(0, 0) * m(2, 2) - m(2, 0) * m(0, 2)) * inverse_determinant);
+    set(1, 2, (m(1, 0) * m(0, 2) - m(0, 0) * m(1, 2)) * inverse_determinant);
+    set(2, 0, (m(1, 0) * m(2, 1) - m(2, 0) * m(1, 1)) * inverse_determinant);
+    set(2, 1, (m(2, 0) * m(0, 1) - m(0, 0) * m(2, 1)) * inverse_determinant);
+    set(2, 2, (m(0, 0) * m(1, 1) - m(1, 0) * m(0, 1)) * inverse_determinant);
+    return result;
+}
+
 [[nodiscard]] Transform fit_to_view(const MeshData& mesh) {
     auto minimum = mesh.vertices.front().position;
     auto maximum = minimum;
@@ -192,6 +227,7 @@ struct GpuRenderable final {
     RenderPipelineResource* pipeline{};
     Transform transform;
     Mat4 model_matrix{};
+    Mat4 normal_matrix{};
     std::vector<SampledTextureBinding> textures;
     std::vector<ColorBinding> colors;
     BoundingSphere local_bounds;
@@ -245,6 +281,7 @@ struct Renderer::Impl final {
     std::vector<GpuRenderable> renderables;
     std::vector<QueuedRenderable> queue;
     Camera camera;
+    Environment environment;
     RenderStatistics statistics;
     bool scene_loaded{};
 };
@@ -355,6 +392,7 @@ std::vector<RenderableId> Renderer::set_scene(Scene scene) {
             .pipeline = gpu_pipeline,
             .transform = renderable.transform(),
             .model_matrix = renderable.transform().matrix(),
+            .normal_matrix = normal_matrix_of(renderable.transform().matrix()),
             .textures = std::move(gpu_texture_bindings),
             .colors = std::move(gpu_color_bindings),
             .local_bounds = gpu_mesh.bounds,
@@ -400,6 +438,7 @@ void Renderer::set_renderable_transform(RenderableId id, Transform transform) {
         throw std::out_of_range{"Unknown renderable identifier"};
     }
     found->model_matrix = transform.matrix();
+    found->normal_matrix = normal_matrix_of(found->model_matrix);
     found->transform = std::move(transform);
 }
 
@@ -415,6 +454,15 @@ Camera Renderer::camera() const {
     return impl_->camera;
 }
 
+void Renderer::set_environment(Environment environment) {
+    environment.sun.direction = normalized_light_direction(environment.sun.direction);
+    impl_->environment = environment;
+}
+
+Environment Renderer::environment() const {
+    return impl_->environment;
+}
+
 void Renderer::render(const Frame& frame) {
     if (!impl_->scene_loaded) {
         throw std::logic_error{"Renderer assets have not been loaded"};
@@ -422,8 +470,11 @@ void Renderer::render(const Frame& frame) {
     const auto aspect = static_cast<float>(frame.framebuffer_width) /
                         static_cast<float>(std::max(frame.framebuffer_height, 1));
     const auto capabilities = impl_->backend->capabilities();
+    const auto safe_aspect = std::max(aspect, 0.01F);
+    const auto view = impl_->camera.view_matrix();
+    const auto projection = impl_->camera.projection_matrix(safe_aspect, capabilities.clip_space);
     const auto view_projection = impl_->camera.view_projection_matrix(
-        std::max(aspect, 0.01F),
+        safe_aspect,
         capabilities.clip_space);
     const auto frustum = Frustum::from_view_projection(view_projection, capabilities.clip_space);
     impl_->queue.clear();
@@ -460,13 +511,22 @@ void Renderer::render(const Frame& frame) {
     });
     statistics.submitted = impl_->queue.size();
     impl_->statistics = statistics;
-    const FrameScope frame_scope{*impl_->backend, frame};
+    auto resolved = frame;
+    resolved.view = view;
+    resolved.projection = projection;
+    resolved.view_projection = view_projection;
+    resolved.camera_position = impl_->camera.position();
+    resolved.environment = impl_->environment;
+
+    const FrameScope frame_scope{*impl_->backend, resolved};
     for (const auto& item : impl_->queue) {
         const auto& renderable = *item.renderable;
         impl_->backend->draw({
             .mesh = *renderable.mesh,
             .pipeline = *renderable.pipeline,
             .model_view_projection = multiply(view_projection, renderable.model_matrix),
+            .model = renderable.model_matrix,
+            .normal_matrix = renderable.normal_matrix,
             .textures = renderable.textures,
             .colors = renderable.colors,
         });
