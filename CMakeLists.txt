@@ -78,6 +78,7 @@ add_library(mgv_core
     src/lighting.cpp
     src/material.cpp
     src/obj_loader.cpp
+    src/primitives.cpp
     src/renderer.cpp
     src/runtime_paths.cpp
     src/scene.cpp
@@ -384,6 +385,7 @@ if(BUILD_TESTING)
         tests/image_loader_test.cpp
         tests/lighting_test.cpp
         tests/obj_loader_test.cpp
+        tests/primitives_test.cpp
         tests/network/datagram_test.cpp
         tests/network/network_service_test.cpp
         tests/network/udp_transport_test.cpp

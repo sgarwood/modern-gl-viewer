@@ -55,3 +55,45 @@ TEST_CASE("shader loader identifies a missing source file") {
         mgv::ShaderLoader::load(missing, fragment.path()),
         Catch::Matchers::ContainsSubstring(missing.string()));
 }
+
+TEST_CASE("shader loader resolves includes relative to the including file") {
+    const std::filesystem::path root{MGV_TEST_FIXTURES};
+    const auto directory = root / "include_shader";
+
+    const auto sources = mgv::ShaderLoader::load(directory / "main.vert", directory / "main.frag");
+
+    SECTION("the included body is substituted in place of the directive") {
+        CHECK(sources.vertex.find("float included_helper()") != std::string::npos);
+        CHECK(sources.vertex.find("#include") == std::string::npos);
+    }
+    SECTION("nested includes are resolved relative to their own directory") {
+        CHECK(sources.fragment.find("const float kNested = 2.0;") != std::string::npos);
+        CHECK(sources.fragment.find("#include") == std::string::npos);
+    }
+    SECTION("a module included twice is expanded only once") {
+        const auto first = sources.fragment.find("float included_helper()");
+        REQUIRE(first != std::string::npos);
+        CHECK(sources.fragment.find("float included_helper()", first + 1) == std::string::npos);
+    }
+    SECTION("line directives keep compiler diagnostics pointing at the right file") {
+        CHECK(sources.fragment.find("#line") != std::string::npos);
+    }
+}
+
+TEST_CASE("shader loader reports a missing include by name") {
+    const std::filesystem::path root{MGV_TEST_FIXTURES};
+    const auto directory = root / "include_shader";
+
+    CHECK_THROWS_WITH(
+        mgv::ShaderLoader::load(directory / "main.vert", directory / "missing_include.frag"),
+        Catch::Matchers::ContainsSubstring("absent.glsl"));
+}
+
+TEST_CASE("shader loader rejects a circular include") {
+    const std::filesystem::path root{MGV_TEST_FIXTURES};
+    const auto directory = root / "include_shader";
+
+    CHECK_THROWS_WITH(
+        mgv::ShaderLoader::load(directory / "main.vert", directory / "cycle_a.frag"),
+        Catch::Matchers::ContainsSubstring("Circular"));
+}

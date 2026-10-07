@@ -1,5 +1,6 @@
 #include "qt_viewer_widget.hpp"
 
+#include "mgv/course_session.hpp"
 #include "mgv/opengl_backend.hpp"
 
 #include <QByteArray>
@@ -17,25 +18,8 @@
 namespace {
 
 void configure_golf_session(mgv::Engine& engine, const mgv::AssetPaths& assets) {
-    const auto entities = engine.load(assets);
-    if (entities.empty()) {
-        throw std::runtime_error{"Golf session requires a renderable ball"};
-    }
-    static_cast<void>(engine.bind_golf_ball(
-        entities.front(),
-        mgv::physics::RigidBodyBuilder{
-            mgv::physics::Collider::sphere(mgv::physics::Length{0.8F})}
-            .at(mgv::physics::Position{{0.0F, 0.8F, 0.0F}})
-            .mass(mgv::physics::Mass{0.04593F})
-            .restitution(0.78F)
-            .build()));
-    static_cast<void>(engine.add_static_collider(
-        mgv::physics::RigidBodyBuilder{
-            mgv::physics::Collider::box(
-                mgv::physics::Dimensions{{100.0F, 0.5F, 100.0F}})}
-            .motion(mgv::physics::MotionType::static_body)
-            .at(mgv::physics::Position{{0.0F, -0.5F, 0.0F}})
-            .build()));
+    const auto description = mgv::default_course_session(assets.model.parent_path());
+    static_cast<void>(mgv::configure_course_session(engine, description));
 }
 
 } // namespace

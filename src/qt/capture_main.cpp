@@ -89,32 +89,32 @@ int main(int argc, char** argv) {
     const QCommandLineOption samples_option{
         "samples", "Multisample count, 0 to disable.", "count", "4"};
     const QCommandLineOption model_option{
-        "model", "OBJ model to load.", "model.obj", qstring_from(asset_directory / "green.obj")};
-    const QCommandLineOption vertex_option{
-        "vertex",
-        "Vertex shader.",
-        "shader.vert",
-        qstring_from(asset_directory / "shaders/default.vert")};
-    const QCommandLineOption fragment_option{
-        "fragment",
-        "Fragment shader.",
-        "shader.frag",
-        qstring_from(asset_directory / "shaders/default.frag")};
+        "model", "Ball model to load.", "model.obj", qstring_from(asset_directory / "ball.obj")};
+    const QCommandLineOption shader_dir_option{
+        "shaders",
+        "Directory holding the course shaders.",
+        "directory",
+        qstring_from(asset_directory / "shaders")};
+    const QCommandLineOption wetness_option{
+        "wetness", "Surface wetness, 0 to 1.", "fraction"};
+    const QCommandLineOption turbidity_option{
+        "turbidity", "Atmospheric turbidity, 1.7 to 10.", "value"};
     const QCommandLineOption camera_option{"camera", "Camera position, \"x,y,z\".", "vec3"};
     const QCommandLineOption target_option{"target", "Camera target, \"x,y,z\".", "vec3"};
     const QCommandLineOption fov_option{"fov", "Vertical field of view, degrees.", "degrees"};
     const QCommandLineOption azimuth_option{"sun-azimuth", "Sun bearing, degrees.", "degrees"};
     const QCommandLineOption elevation_option{
         "sun-elevation", "Sun elevation above the horizon, degrees.", "degrees"};
-    const QCommandLineOption exposure_option{"exposure", "Tone-mapping exposure.", "scale"};
+    const QCommandLineOption exposure_option{"exposure", "Exposure value at ISO 100; daylight is near 15.", "ev100"};
     for (const auto& option : {out_option,
                                width_option,
                                height_option,
                                frames_option,
                                samples_option,
                                model_option,
-                               vertex_option,
-                               fragment_option,
+                               shader_dir_option,
+                               wetness_option,
+                               turbidity_option,
                                camera_option,
                                target_option,
                                fov_option,
@@ -167,11 +167,13 @@ int main(int argc, char** argv) {
             return context.getProcAddress(QByteArray{name});
         }));
 
-        auto description = mgv::default_course_session({
-            .model = path_from(parser.value(model_option)),
-            .vertex_shader = path_from(parser.value(vertex_option)),
-            .fragment_shader = path_from(parser.value(fragment_option)),
-        });
+        auto description = mgv::default_course_session(asset_directory);
+        if (parser.isSet(model_option)) {
+            description.assets.ball_model = path_from(parser.value(model_option));
+        }
+        if (parser.isSet(shader_dir_option)) {
+            description.assets.shader_directory = path_from(parser.value(shader_dir_option));
+        }
         if (parser.isSet(camera_option)) {
             const auto position = parse_vec3(parser.value(camera_option));
             if (!position) {
@@ -203,7 +205,14 @@ int main(int argc, char** argv) {
                 mgv::sun_direction_from_angles(azimuth, elevation);
         }
         if (parser.isSet(exposure_option)) {
-            description.environment.exposure = parser.value(exposure_option).toFloat();
+            description.environment.exposure =
+                mgv::exposure_from_ev100(parser.value(exposure_option).toFloat());
+        }
+        if (parser.isSet(wetness_option)) {
+            description.environment.surface_wetness = parser.value(wetness_option).toFloat();
+        }
+        if (parser.isSet(turbidity_option)) {
+            description.environment.turbidity = parser.value(turbidity_option).toFloat();
         }
 
         static_cast<void>(mgv::configure_course_session(*engine, description));

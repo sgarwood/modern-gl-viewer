@@ -2,36 +2,53 @@
 
 #include "mgv/engine.hpp"
 #include "mgv/lighting.hpp"
+#include "mgv/primitives.hpp"
 #include "mgv/renderer.hpp"
+
+#include <filesystem>
 
 namespace mgv {
 
 /// How a course session should be framed when it starts.
 struct CourseViewpoint final {
-    Vec3 position{0.0F, 1.7F, 12.0F};
-    Vec3 target{0.0F, 0.6F, 0.0F};
-    float vertical_field_of_view_degrees{55.0F};
+    Vec3 position{3.1F, 2.35F, 8.6F};
+    Vec3 target{-0.4F, 0.05F, -9.0F};
+    float vertical_field_of_view_degrees{46.0F};
     float near_plane{0.05F};
-    float far_plane{2'000.0F};
+    float far_plane{4'000.0F};
 };
 
-/// Everything the engine needs to stand up a playable hole.
+/// The models and shader directory a hole is built from.
+///
+/// The terrain is generated rather than loaded: it has to agree exactly with
+/// the analytic surface the physics heightmap uses, and it has to run out to
+/// the horizon rather than stopping at the edge of a mesh.
+struct CourseAssets final {
+    std::filesystem::path ball_model;
+    std::filesystem::path shader_directory;
+};
+
 struct CourseSessionDescription final {
-    AssetPaths assets;
+    CourseAssets assets;
+    CourseTerrainDescription terrain;
     CourseViewpoint viewpoint;
     Environment environment;
 };
 
-/// Loads the course assets, binds the golf ball to a rigid body, installs the
-/// static ground collider, and applies the viewpoint and environment.
+/// Builds the sky dome, terrain, and ball, binds the ball to a rigid body,
+/// installs the ground collider, and applies the viewpoint and environment.
 ///
-/// Every frontend goes through this one function so that the interactive
-/// window, the GLFW shell, and the offscreen capture tool all render the same
-/// scene. Returns the entity that owns the ball.
+/// Every frontend goes through this one function so the interactive window and
+/// the offscreen capture tool render the same scene. Returns the ball entity.
 EntityId configure_course_session(Engine& engine, const CourseSessionDescription& description);
 
-/// The default description for a given asset set: a tee-box framing and a
-/// clear late-morning sky.
-[[nodiscard]] CourseSessionDescription default_course_session(AssetPaths assets);
+/// A clear late-morning round on the bundled assets.
+[[nodiscard]] CourseSessionDescription default_course_session(
+    const std::filesystem::path& asset_directory);
+
+/// The linear exposure multiplier for a given photographic exposure value at
+/// ISO 100, following the standard saturation-based relation. Daylight sits
+/// near EV 15.
+[[nodiscard]] float exposure_from_ev100(float ev100) noexcept;
 
 } // namespace mgv
