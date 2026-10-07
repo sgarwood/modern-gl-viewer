@@ -99,7 +99,11 @@ cheaper and steadier.
 
 One unit-height blade mesh serves the whole course; height, width, lean, and
 colour all arrive as instance parameters, taken from the height of cut where
-each blade stands. A putting green grows none worth drawing. The field thins
+each blade stands. A blade's spine is a quadratic Bezier, after the approach
+Sucker Punch described for *Ghost of Tsushima*: a rotation pivots the blade
+about its root, where a real one bends along its length, and having the spine
+in closed form gives the tangent exactly, which is what the normal needs.
+Blades align downwind as the wind rises, so a gust crosses the field. A putting green grows none worth drawing. The field thins
 in number and in height towards its rim, or it ends in a visible ring.
 
 Blades do not cast into the shadow map: a hundred thousand of them would spend
@@ -107,7 +111,10 @@ the whole map on detail finer than one of its texels.
 
 The field is static and centred on the ball. Patches that follow the camera,
 regenerated as the player walks, are the next step and are what this needs to
-become before the hike is playable.
+become before the hike is playable. The same applies to the terrain: its
+rings are concentric square loops coarsening outwards, which is the structure
+of a geometry clipmap, but centred on the green rather than on the viewer. A
+clipmap proper translates with the camera and snaps to whole grid steps.
 
 ## Trees and litter
 
@@ -129,6 +136,14 @@ spheres still read as spheres, because the silhouette stays circular and the
 eye reads silhouette first. The displacement has to be coherent: hashing each
 vertex of a low-poly sphere turns it into visible flat facets, which looks
 worse than the sphere did.
+
+Canopy normals are transferred from a single sphere around the whole crown,
+blended rather than replaced. Foliage built from separate masses otherwise
+shades as separate masses: every lobe is lit as its own sphere, so a crown
+reads as a heap of balloons and flickers lobe by lobe as the sun moves. This
+is the long-standing fix in vegetation art, and it is the largest single
+improvement available to a crown built from geometry. The bole is left alone,
+because a trunk genuinely is a cylinder.
 
 Each species is one draw with every tree of that kind as an instance, and its
 colours ride on the material instance, since they are the same for every tree

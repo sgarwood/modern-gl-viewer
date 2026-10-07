@@ -604,6 +604,51 @@ void append_tapered_tube(
     }
 }
 
+/// Re-points canopy normals outwards from a centre.
+///
+/// Foliage built from separate masses shades as separate masses: every lobe
+/// is lit as its own sphere, so a crown reads as a heap of balloons and
+/// flickers lobe by lobe as the sun moves. The long-standing fix in
+/// vegetation art is to transfer the normals from a single sphere around the
+/// whole crown, so the canopy receives light as one volume. Blending rather
+/// than replacing keeps enough of the original normal for the surface to
+/// still have form.
+///
+/// Only canopy vertices are touched; bark keeps the normals it was built
+/// with, since a trunk genuinely is a cylinder.
+void spherify_canopy_normals(MeshData& mesh, std::size_t first, Vec3 centre, float amount) {
+    for (auto index = first; index < mesh.vertices.size(); ++index) {
+        auto& vertex = mesh.vertices[index];
+        if (vertex.tex_coord.x < 0.5F) {
+            continue;
+        }
+        const Vec3 outward{
+            vertex.position.x - centre.x,
+            vertex.position.y - centre.y,
+            vertex.position.z - centre.z,
+        };
+        const auto length =
+            std::sqrt(outward.x * outward.x + outward.y * outward.y + outward.z * outward.z);
+        if (!(length > 1.0e-5F)) {
+            continue;
+        }
+        const Vec3 blended{
+            std::lerp(vertex.normal.x, outward.x / length, amount),
+            std::lerp(vertex.normal.y, outward.y / length, amount),
+            std::lerp(vertex.normal.z, outward.z / length, amount),
+        };
+        const auto blended_length =
+            std::sqrt(blended.x * blended.x + blended.y * blended.y + blended.z * blended.z);
+        if (blended_length > 1.0e-5F) {
+            vertex.normal = {
+                blended.x / blended_length,
+                blended.y / blended_length,
+                blended.z / blended_length,
+            };
+        }
+    }
+}
+
 /// How a species carries its crown.
 struct CrownShape final {
     /// Height at which foliage begins, as a fraction of the tree's height.
@@ -636,6 +681,7 @@ void append_broadleaf_crown(
     const auto centre_y = (base + top) * 0.5F;
     const auto half_height = (top - base) * 0.5F;
     const auto radius = height * crown.radius_fraction;
+    const auto canopy_first = mesh.vertices.size();
 
     for (int limb = 0; limb < crown.limbs; ++limb) {
         const auto angle = 2.0F * pi * static_cast<float>(limb) / static_cast<float>(crown.limbs) +
@@ -671,6 +717,8 @@ void append_broadleaf_crown(
             13,
             rng.next(0.0F, 6.28F));
     }
+
+    spherify_canopy_normals(mesh, canopy_first, {0.0F, centre_y, 0.0F}, 0.78F);
 }
 
 /// A conifer crown: whorls of branches narrowing to a leader, which is the
@@ -682,6 +730,7 @@ void append_conifer_crown(
     float bare_height,
     float crown_radius) {
     const auto crown_height = height - bare_height;
+    const auto canopy_first = mesh.vertices.size();
     constexpr int whorls = 8;
     for (int whorl = 0; whorl < whorls; ++whorl) {
         const auto t = static_cast<float>(whorl) / static_cast<float>(whorls - 1);
@@ -714,6 +763,11 @@ void append_conifer_crown(
         7,
         1.0F,
         {0.0F, height - crown_height * 0.18F, 0.0F});
+
+    // A conifer is a cone, not a ball, and its whorls are meant to read as
+    // separate tiers, so it takes far less of the treatment than a broadleaf.
+    spherify_canopy_normals(
+        mesh, canopy_first, {0.0F, bare_height + crown_height * 0.42F, 0.0F}, 0.42F);
 }
 
 } // namespace

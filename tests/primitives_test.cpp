@@ -542,3 +542,49 @@ TEST_CASE("leaf litter rejects a degenerate description") {
     no_size.leaf_length = 0.0F;
     CHECK_THROWS(mgv::make_leaf_litter(piles, no_size, terrain));
 }
+
+TEST_CASE("canopy normals are re-pointed outwards but bark keeps its own") {
+    const auto tree = grow(mgv::TreeSpecies::maple);
+
+    // Foliage built from separate masses shades as separate masses unless the
+    // normals are transferred from one sphere around the whole crown. The
+    // trunk must not be touched: a trunk genuinely is a cylinder, and
+    // spherifying it would light it from inside.
+    auto crown_sum = 0.0F;
+    auto crown_count = 0;
+    auto bark_outward = 0;
+    auto bark_count = 0;
+    for (const auto& vertex : tree.vertices) {
+        const auto radial = std::sqrt(vertex.position.x * vertex.position.x +
+                                      vertex.position.z * vertex.position.z);
+        const auto outward = radial > 1.0e-4F
+            ? (vertex.normal.x * vertex.position.x + vertex.normal.z * vertex.position.z) / radial
+            : 0.0F;
+        if (vertex.tex_coord.x > 0.5F) {
+            crown_sum += outward;
+            ++crown_count;
+        } else if (vertex.position.y > 0.5F && vertex.position.y < 3.5F) {
+            // The clear bole only. Limbs are bark too, but their normals are
+            // radial to the limb they belong to, not to the trunk's axis.
+            bark_outward += outward > 0.95F ? 1 : 0;
+            ++bark_count;
+        }
+    }
+
+    REQUIRE(crown_count > 0);
+    REQUIRE(bark_count > 0);
+    SECTION("canopy normals point away from the crown's axis on average") {
+        CHECK(crown_sum / static_cast<float>(crown_count) > 0.3F);
+    }
+    SECTION("the bole's normals stay exactly radial to the trunk") {
+        CHECK(bark_outward == bark_count);
+    }
+    SECTION("every normal stays a unit vector") {
+        for (const auto& vertex : tree.vertices) {
+            const auto length = std::sqrt(vertex.normal.x * vertex.normal.x +
+                                          vertex.normal.y * vertex.normal.y +
+                                          vertex.normal.z * vertex.normal.z);
+            CHECK(length == Catch::Approx(1.0F).epsilon(1.0e-3F));
+        }
+    }
+}
