@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -51,6 +52,46 @@ public:
     }
     VertexArray(const VertexArray&) = delete;
     VertexArray& operator=(const VertexArray&) = delete;
+    [[nodiscard]] GLuint get() const noexcept { return name_; }
+
+private:
+    GLuint name_{};
+};
+
+class Renderbuffer final {
+public:
+    Renderbuffer() { glGenRenderbuffers(1, &name_); }
+    ~Renderbuffer() { glDeleteRenderbuffers(1, &name_); }
+    Renderbuffer(Renderbuffer&& other) noexcept : name_{std::exchange(other.name_, 0)} {}
+    Renderbuffer& operator=(Renderbuffer&& other) noexcept {
+        if (this != &other) {
+            glDeleteRenderbuffers(1, &name_);
+            name_ = std::exchange(other.name_, 0);
+        }
+        return *this;
+    }
+    Renderbuffer(const Renderbuffer&) = delete;
+    Renderbuffer& operator=(const Renderbuffer&) = delete;
+    [[nodiscard]] GLuint get() const noexcept { return name_; }
+
+private:
+    GLuint name_{};
+};
+
+class Framebuffer final {
+public:
+    Framebuffer() { glGenFramebuffers(1, &name_); }
+    ~Framebuffer() { glDeleteFramebuffers(1, &name_); }
+    Framebuffer(Framebuffer&& other) noexcept : name_{std::exchange(other.name_, 0)} {}
+    Framebuffer& operator=(Framebuffer&& other) noexcept {
+        if (this != &other) {
+            glDeleteFramebuffers(1, &name_);
+            name_ = std::exchange(other.name_, 0);
+        }
+        return *this;
+    }
+    Framebuffer(const Framebuffer&) = delete;
+    Framebuffer& operator=(const Framebuffer&) = delete;
     [[nodiscard]] GLuint get() const noexcept { return name_; }
 
 private:
@@ -363,6 +404,193 @@ private:
     SamplerName name_;
 };
 
+// ---------------------------------------------------------------------------
+// High dynamic range scene target and tone-mapped composite
+// ---------------------------------------------------------------------------
+
+/// A floating-point colour target the scene is rendered into, so lighting can
+/// work in absolute radiometric units and only the composite pass decides what
+/// the display sees.
+class HdrTarget final {
+public:
+    /// Recreates the attachments when the viewport changes. Returns false when
+    /// the driver cannot provide a complete floating-point target, which lets
+    /// the backend fall back to rendering straight to the output framebuffer.
+    [[nodiscard]] bool ensure(GLsizei width, GLsizei height) {
+        if (width == width_ && height == height_) {
+            return complete_;
+        }
+        width_ = width;
+        height_ = height;
+
+        glBindTexture(GL_TEXTURE_2D, color_.name());
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        glBindRenderbuffer(GL_RENDERBUFFER, depth_.get());
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_.get());
+        glFramebufferTexture2D(
+            GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color_.name(), 0);
+        glFramebufferRenderbuffer(
+            GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depth_.get());
+        complete_ = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        return complete_;
+    }
+
+    [[nodiscard]] GLuint framebuffer() const noexcept { return framebuffer_.get(); }
+    [[nodiscard]] GLuint color_texture() const noexcept { return color_.name(); }
+
+private:
+    class ColorTexture final {
+    public:
+        ColorTexture() { glGenTextures(1, &name_); }
+        ~ColorTexture() { glDeleteTextures(1, &name_); }
+        ColorTexture(ColorTexture&&) = delete;
+        ColorTexture& operator=(ColorTexture&&) = delete;
+        ColorTexture(const ColorTexture&) = delete;
+        ColorTexture& operator=(const ColorTexture&) = delete;
+        [[nodiscard]] GLuint name() const noexcept { return name_; }
+
+    private:
+        GLuint name_{};
+    };
+
+    Framebuffer framebuffer_;
+    ColorTexture color_;
+    Renderbuffer depth_;
+    GLsizei width_{-1};
+    GLsizei height_{-1};
+    bool complete_{};
+};
+
+constexpr std::string_view composite_vertex_source = R"(#version 410 core
+out vec2 vUv;
+void main() {
+    // A single oversized triangle covering the viewport, so there is no seam
+    // down the diagonal that a two-triangle quad would introduce.
+    vec2 corner = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+    vUv = corner;
+    gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);
+}
+)";
+
+constexpr std::string_view composite_fragment_source = R"(#version 410 core
+in vec2 vUv;
+out vec4 fragColor;
+
+uniform sampler2D uSceneColor;
+uniform float uExposure;
+uniform vec2 uViewportSize;
+
+// ACES filmic tone mapping, using Stephen Hill's fit of the RRT and ODT.
+const mat3 kAcesInput = mat3(
+    0.59719, 0.07600, 0.02840,
+    0.35458, 0.90834, 0.13383,
+    0.04823, 0.01566, 0.83777);
+
+const mat3 kAcesOutput = mat3(
+     1.60475, -0.10208, -0.00327,
+    -0.53108,  1.10813, -0.07276,
+    -0.07367, -0.00605,  1.07602);
+
+vec3 rrt_and_odt_fit(vec3 v) {
+    vec3 a = v * (v + 0.0245786) - 0.000090537;
+    vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+    return a / b;
+}
+
+vec3 tonemap_aces(vec3 color) {
+    color = kAcesInput * color;
+    color = rrt_and_odt_fit(color);
+    return clamp(kAcesOutput * color, 0.0, 1.0);
+}
+
+vec3 encode_srgb(vec3 linear) {
+    vec3 low = linear * 12.92;
+    vec3 high = 1.055 * pow(max(linear, vec3(1e-5)), vec3(1.0 / 2.4)) - 0.055;
+    return mix(low, high, step(vec3(0.0031308), linear));
+}
+
+// An ordered dither of well under one 8-bit step, which breaks up the banding
+// that wide sky gradients otherwise show after quantisation.
+float dither(vec2 position) {
+    return fract(dot(position, vec2(0.0344827586, 0.0689655172)) + 0.5) - 0.5;
+}
+
+void main() {
+    vec3 scene = texture(uSceneColor, vUv).rgb;
+    vec3 mapped = tonemap_aces(scene * uExposure);
+    vec3 display = encode_srgb(mapped);
+    display += dither(gl_FragCoord.xy) * (1.0 / 255.0);
+    fragColor = vec4(display, 1.0);
+}
+)";
+
+/// Resolves the floating-point scene target to the output framebuffer,
+/// applying exposure, the ACES curve, the sRGB transfer function, and a dither.
+class CompositePass final {
+public:
+    CompositePass() {
+        const auto vertex = compile_shader(
+            GL_VERTEX_SHADER, std::string{composite_vertex_source}, "composite.vert");
+        const auto fragment = compile_shader(
+            GL_FRAGMENT_SHADER, std::string{composite_fragment_source}, "composite.frag");
+        glAttachShader(program_.get(), vertex.get());
+        glAttachShader(program_.get(), fragment.get());
+        glLinkProgram(program_.get());
+        GLint linked{};
+        glGetProgramiv(program_.get(), GL_LINK_STATUS, &linked);
+        if (linked != GL_TRUE) {
+            throw std::runtime_error{
+                "Composite shader link failed:\n" + program_log(program_.get())};
+        }
+        scene_color_ = glGetUniformLocation(program_.get(), "uSceneColor");
+        exposure_ = glGetUniformLocation(program_.get(), "uExposure");
+        viewport_ = glGetUniformLocation(program_.get(), "uViewportSize");
+    }
+
+    void run(GLuint scene_texture, float exposure, GLsizei width, GLsizei height) const {
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+        glDisable(GL_BLEND);
+        glDisable(GL_CULL_FACE);
+        glUseProgram(program_.get());
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, scene_texture);
+        glBindSampler(0, 0);
+        if (scene_color_ >= 0) {
+            glUniform1i(scene_color_, 0);
+        }
+        if (exposure_ >= 0) {
+            glUniform1f(exposure_, exposure);
+        }
+        if (viewport_ >= 0) {
+            glUniform2f(viewport_, static_cast<float>(width), static_cast<float>(height));
+        }
+        glBindVertexArray(vertex_array_.get());
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindVertexArray(0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDepthMask(GL_TRUE);
+        glEnable(GL_DEPTH_TEST);
+    }
+
+private:
+    Program program_;
+    VertexArray vertex_array_;
+    GLint scene_color_{-1};
+    GLint exposure_{-1};
+    GLint viewport_{-1};
+};
+
 /// The uniforms every mgv shader may declare. A shader that omits one simply
 /// does not receive it, which keeps the minimal viewer shaders valid.
 enum class StandardUniform : std::size_t {
@@ -537,9 +765,25 @@ public:
             trail_.push_back(point.y);
             trail_.push_back(point.z);
         }
-        glViewport(0, 0, frame.framebuffer_width, frame.framebuffer_height);
+
+        const auto width = static_cast<GLsizei>(frame.framebuffer_width);
+        const auto height = static_cast<GLsizei>(frame.framebuffer_height);
+
+        // The host owns the framebuffer we were called with: QOpenGLWidget and
+        // the capture tool both render into their own. Remember it so the
+        // composite can resolve back into the right place.
+        GLint bound{};
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &bound);
+        output_framebuffer_ = static_cast<GLuint>(bound);
+
+        scene_is_hdr_ = !hdr_disabled_ && hdr_target_.ensure(width, height);
+        if (scene_is_hdr_) {
+            glBindFramebuffer(GL_FRAMEBUFFER, hdr_target_.framebuffer());
+        }
+
+        glViewport(0, 0, width, height);
         glDepthMask(GL_TRUE);
-        glClearColor(0.025F, 0.035F, 0.055F, 1.0F);
+        glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     }
 
@@ -686,12 +930,38 @@ public:
         glActiveTexture(GL_TEXTURE0);
     }
 
-    void end_frame() noexcept override {}
+    void end_frame() noexcept override {
+        if (!scene_is_hdr_) {
+            return;
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, output_framebuffer_);
+        glViewport(0, 0, frame_.framebuffer_width, frame_.framebuffer_height);
+        try {
+            if (!composite_) {
+                composite_.emplace();
+            }
+            composite_->run(
+                hdr_target_.color_texture(),
+                frame_.environment.exposure,
+                static_cast<GLsizei>(frame_.framebuffer_width),
+                static_cast<GLsizei>(frame_.framebuffer_height));
+        } catch (const std::exception&) {
+            // A driver that cannot compile the composite shader still gets a
+            // picture: subsequent frames skip the HDR path entirely.
+            scene_is_hdr_ = false;
+            hdr_disabled_ = true;
+        }
+    }
 
 private:
     std::uint32_t max_sampled_textures_{};
     Frame frame_;
     std::vector<float> trail_;
+    HdrTarget hdr_target_;
+    std::optional<CompositePass> composite_;
+    GLuint output_framebuffer_{};
+    bool scene_is_hdr_{};
+    bool hdr_disabled_{};
 };
 
 } // namespace

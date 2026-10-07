@@ -12,6 +12,17 @@
 
 namespace mgv {
 
+/// Whether a loaded model keeps its authored units or is rescaled to fill the
+/// default view.
+///
+/// The OBJ viewer wants `fit_to_view` so that any model is immediately
+/// visible. A simulation wants `authored`, because its assets are modelled in
+/// metres and its physics bodies are sized in metres too.
+enum class ModelFit {
+    fit_to_view,
+    authored,
+};
+
 struct AssetPaths final {
     std::filesystem::path model;
     std::filesystem::path vertex_shader;
@@ -37,7 +48,7 @@ public:
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
 
-    std::vector<RenderableId> load(const AssetPaths& paths);
+    std::vector<RenderableId> load(const AssetPaths& paths, ModelFit fit = ModelFit::fit_to_view);
     std::vector<RenderableId> load(MeshData mesh, ShaderSources shaders);
     std::vector<RenderableId> set_scene(Scene scene);
     void remove_renderable(RenderableId id);

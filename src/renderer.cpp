@@ -146,11 +146,14 @@ namespace {
     return transform;
 }
 
-[[nodiscard]] Scene make_imported_scene(ImportedModel model, ShaderSources shaders) {
+[[nodiscard]] Scene make_imported_scene(
+    ImportedModel model,
+    ShaderSources shaders,
+    ModelFit fit) {
     if (model.primitives.empty()) {
         throw std::invalid_argument{"Cannot create an empty imported model"};
     }
-    const auto transform = fit_to_view(model);
+    const auto transform = fit == ModelFit::authored ? Transform{} : fit_to_view(model);
     const auto material = std::make_shared<const Material>(std::move(shaders));
     auto transparent_pipeline = material->pipeline();
     transparent_pipeline.depth.write_enabled = false;
@@ -292,10 +295,11 @@ Renderer::~Renderer() = default;
 Renderer::Renderer(Renderer&&) noexcept = default;
 Renderer& Renderer::operator=(Renderer&&) noexcept = default;
 
-std::vector<RenderableId> Renderer::load(const AssetPaths& paths) {
+std::vector<RenderableId> Renderer::load(const AssetPaths& paths, ModelFit fit) {
     return set_scene(make_imported_scene(
         ObjLoader{}.load_model(paths.model),
-        ShaderLoader::load(paths.vertex_shader, paths.fragment_shader)));
+        ShaderLoader::load(paths.vertex_shader, paths.fragment_shader),
+        fit));
 }
 
 std::vector<RenderableId> Renderer::load(MeshData mesh, ShaderSources shaders) {

@@ -13,6 +13,7 @@ option(MGV_HEADLESS_GLFW "Use GLFW's null platform for build/test environments" 
 option(MGV_GLFW_X11 "Build GLFW's X11 platform on Linux" ON)
 option(MGV_GLFW_WAYLAND "Build GLFW's Wayland platform on Linux" OFF)
 option(MGV_WARNINGS_AS_ERRORS "Treat project warnings as errors" OFF)
+option(MGV_BUILD_CAPTURE_TOOL "Build the offscreen PNG capture tool" OFF)
 
 add_library(mgv_project_warnings INTERFACE)
 add_library(mgv::project_warnings ALIAS mgv_project_warnings)
@@ -179,6 +180,7 @@ target_link_libraries(mgv_animation
 )
 
 add_library(mgv_runtime
+    src/course_session.cpp
     src/engine.cpp
 )
 add_library(mgv::runtime ALIAS mgv_runtime)
@@ -196,11 +198,15 @@ if(MGV_BUILD_QT_APP OR MGV_BUILD_QML_APP)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets OpenGLWidgets)
 endif()
 
+if(MGV_BUILD_CAPTURE_TOOL)
+    find_package(Qt6 6.4 REQUIRED COMPONENTS Gui OpenGL)
+endif()
+
 if(MGV_BUILD_QML_APP)
     find_package(Qt6 6.4 REQUIRED COMPONENTS Qml Quick QuickControls2)
 endif()
 
-if(MGV_BUILD_GLFW_APP OR MGV_BUILD_QT_APP OR MGV_BUILD_QML_APP)
+if(MGV_BUILD_GLFW_APP OR MGV_BUILD_QT_APP OR MGV_BUILD_QML_APP OR MGV_BUILD_CAPTURE_TOOL)
     FetchContent_Declare(glad
         GIT_REPOSITORY https://github.com/Dav1dde/glad.git
         GIT_TAG 73db193f853e2ee079bf3ca8a64aa2eaf6459043 # v2.0.8
@@ -302,6 +308,21 @@ if(MGV_BUILD_QT_APP)
         MACOSX_BUNDLE TRUE
     )
     qt_finalize_executable(mgv_qt)
+endif()
+
+if(MGV_BUILD_CAPTURE_TOOL)
+    add_executable(mgv_capture src/qt/capture_main.cpp)
+    target_compile_features(mgv_capture PRIVATE cxx_std_20)
+    target_link_libraries(mgv_capture PRIVATE
+        mgv::runtime
+        mgv::opengl
+        mgv::project_warnings
+        Qt6::Gui
+        Qt6::OpenGL
+    )
+    target_compile_definitions(mgv_capture PRIVATE
+        MGV_DEFAULT_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+    )
 endif()
 
 if(MGV_BUILD_QML_APP)

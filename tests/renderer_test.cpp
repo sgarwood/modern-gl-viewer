@@ -709,3 +709,36 @@ TEST_CASE("renderer forwards the wet trail it was given for the frame") {
     REQUIRE(calls.frame_trail_sizes.size() == 1);
     CHECK(calls.frame_trail_sizes.front() == 2);
 }
+
+TEST_CASE("an authored fit preserves the modelled units of an asset") {
+    const std::filesystem::path fixtures{MGV_TEST_FIXTURES};
+    const mgv::AssetPaths paths{
+        .model = fixtures / "triangle.obj",
+        .vertex_shader = fixtures / "basic.vert",
+        .fragment_shader = fixtures / "basic.frag",
+    };
+
+    Calls fitted_calls;
+    mgv::Renderer fitted{std::make_unique<FakeBackend>(fitted_calls)};
+    static_cast<void>(fitted.load(paths, mgv::ModelFit::fit_to_view));
+    const auto fitted_ids = fitted.last_frame_statistics();
+    static_cast<void>(fitted_ids);
+
+    Calls authored_calls;
+    mgv::Renderer authored{std::make_unique<FakeBackend>(authored_calls)};
+    const auto authored_ids = authored.load(paths, mgv::ModelFit::authored);
+    REQUIRE(authored_ids.size() == 1);
+
+    SECTION("an authored load applies no transform at all") {
+        const auto transform = authored.renderable_transform(authored_ids.front());
+        CHECK(transform.position() == mgv::Vec3{0.0F, 0.0F, 0.0F});
+        CHECK(transform.scale() == mgv::Vec3{1.0F, 1.0F, 1.0F});
+    }
+
+    SECTION("the default load still rescales to fill the view") {
+        const auto ids = fitted.load(paths);
+        REQUIRE(ids.size() == 1);
+        const auto transform = fitted.renderable_transform(ids.front());
+        CHECK(transform.scale().x != 1.0F);
+    }
+}

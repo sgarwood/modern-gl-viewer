@@ -141,7 +141,7 @@ public:
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
 
-    std::vector<EntityId> load(const AssetPaths& assets);
+    std::vector<EntityId> load(const AssetPaths& assets, ModelFit fit = ModelFit::fit_to_view);
     std::vector<EntityId> set_scene(Scene scene);
     [[nodiscard]] physics::BodyId bind_physics(
         EntityId entity,

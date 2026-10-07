@@ -410,8 +410,8 @@ Engine::~Engine() = default;
 Engine::Engine(Engine&&) noexcept = default;
 Engine& Engine::operator=(Engine&&) noexcept = default;
 
-std::vector<EntityId> Engine::load(const AssetPaths& assets) {
-    return impl_->replace_entities(impl_->renderer.load(assets));
+std::vector<EntityId> Engine::load(const AssetPaths& assets, ModelFit fit) {
+    return impl_->replace_entities(impl_->renderer.load(assets, fit));
 }
 
 std::vector<EntityId> Engine::set_scene(Scene scene) {

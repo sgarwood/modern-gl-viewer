@@ -15,7 +15,8 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "MGV_BUILD_GLFW_APP": "OFF",
         "MGV_BUILD_QT_APP": "ON",
-        "MGV_WARNINGS_AS_ERRORS": "ON"
+        "MGV_WARNINGS_AS_ERRORS": "ON",
+        "MGV_BUILD_CAPTURE_TOOL": "ON"
       }
     },
     {
@@ -45,25 +46,40 @@
     }
   ],
   "buildPresets": [
-    { "name": "wsl-qt", "configurePreset": "wsl-qt" },
-    { "name": "wsl-qml", "configurePreset": "wsl-qml" },
-    { "name": "headless-tests", "configurePreset": "headless-tests" }
+    {
+      "name": "wsl-qt",
+      "configurePreset": "wsl-qt"
+    },
+    {
+      "name": "wsl-qml",
+      "configurePreset": "wsl-qml"
+    },
+    {
+      "name": "headless-tests",
+      "configurePreset": "headless-tests"
+    }
   ],
   "testPresets": [
     {
       "name": "wsl-qt",
       "configurePreset": "wsl-qt",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "wsl-qml",
       "configurePreset": "wsl-qml",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "headless-tests",
       "configurePreset": "headless-tests",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }
