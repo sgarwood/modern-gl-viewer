@@ -1,3 +1,4 @@
+#include <iostream>
 #include "mgv/physics/physics_world.hpp"
 
 #include <algorithm>
@@ -207,6 +208,47 @@ public:
             Vec3 a_aero = {0.0F, 0.0F, 0.0F};
             Vec3 v_body = body.velocity_.metres_per_second();
             Vec3 v_wind = wind_.metres_per_second();
+            
+            // Check Foliage Wakes
+            bool inside_foliage = false;
+            float current_density = 0.0f;
+            for (const auto& vol : foliage_volumes_) {
+                // Check if in wake (simplified: if we are downwind (Z > vol.max.z) and within X/Y bounds)
+                // For this slice, just assume wind blows along Z axis.
+                // Wake zone extends 20 meters behind the tree.
+                if (body.position_.metres().x >= vol.min.x && body.position_.metres().x <= vol.max.x &&
+                    body.position_.metres().y >= vol.min.y && body.position_.metres().y <= vol.max.y) {
+                    
+                    if (body.position_.metres().z >= vol.min.z && body.position_.metres().z <= vol.max.z) {
+                        inside_foliage = true;
+                        current_density = vol.density;
+                        // Inside tree: wind drops to 20%
+                        v_wind = scaled(v_wind, 0.2f);
+                    } else if (body.position_.metres().z > vol.max.z && body.position_.metres().z < vol.max.z + 20.0f) {
+                        // Wake recovery
+                        float dist = body.position_.metres().z - vol.max.z;
+                        float recovery = 0.2f + 0.8f * (dist / 20.0f);
+                        v_wind = scaled(v_wind, recovery);
+                        
+                        // Add turbulence (von Karman vortex)
+                        v_wind.x += std::sin(dist * 2.0f) * 1.5f;
+                    }
+                }
+            }
+            
+            if (inside_foliage && length(v_body) > 1.0f) {
+                // Probabilistic branch collision
+                float chance = current_density * length(v_body) * 0.01f;
+                // Deterministic pseudo-random based on position
+                float roll = std::abs(std::sin(body.position_.metres().z * 100.0f));
+                if (roll < chance) {
+                    // Deflect!
+                    body.velocity_ = LinearVelocity{Vec3{v_body.x * 0.2f, -std::abs(v_body.y) * 0.5f, v_body.z * 0.2f}};
+                    std::cout << "[PHYSICS] THWACK! Ball hit a tree branch!" << std::endl;
+                    v_body = body.velocity_.metres_per_second();
+                }
+            }
+            
             Vec3 v_air = subtract(v_body, v_wind);
             float v_air_len = length(v_air);
             
@@ -369,6 +411,7 @@ public:
     std::unique_ptr<CollisionDetector> collision_detector;
     std::deque<RigidBody> bodies;
     std::vector<Collision> collisions;
+    std::vector<FoliageVolume> foliage_volumes_;
     LinearVelocity wind_{};
     float air_density_{1.225F};
     float wetness_{0.0f};
@@ -402,6 +445,11 @@ void PhysicsWorld::set_wetness(float wetness) {
 
 void PhysicsWorld::set_air_density(float rho) {
     impl_->air_density_ = rho;
+}
+
+
+void PhysicsWorld::add_foliage_volume(FoliageVolume volume) {
+    impl_->foliage_volumes_.push_back(volume);
 }
 
 void PhysicsWorld::set_wind(LinearVelocity wind) {

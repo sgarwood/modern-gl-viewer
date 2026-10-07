@@ -25,6 +25,13 @@ struct RaycastHit final {
 class PhysicsWorldImpl;
 
 
+
+struct FoliageVolume {
+    Vec3 min;
+    Vec3 max;
+    float density;
+};
+
 class PhysicsWorld final {
 public:
     PhysicsWorld();
@@ -46,6 +53,7 @@ public:
     [[nodiscard]] std::span<const Collision> collisions() const noexcept;
 
     void set_wind(LinearVelocity wind);
+    void add_foliage_volume(FoliageVolume volume);
     void set_air_density(float rho);
     void set_wetness(float wetness);
     [[nodiscard]] std::optional<RaycastHit> raycast(Position origin, Vec3 direction) const;

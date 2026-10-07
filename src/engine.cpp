@@ -455,6 +455,11 @@ animation::AnimationPlayerId Engine::bind_animation(
     return player;
 }
 
+
+void Engine::add_foliage_volume(physics::FoliageVolume volume) {
+    impl_->physics_world.add_foliage_volume(volume);
+}
+
 void Engine::remove(EntityId entity) {
     const auto found = std::ranges::find(impl_->entities, entity, &EntityRecord::id);
     if (found == impl_->entities.end()) {

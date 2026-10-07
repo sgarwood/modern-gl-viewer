@@ -157,6 +157,7 @@ public:
         EntityId entity,
         animation::AnimationClipId clip);
     void remove(EntityId entity);
+    void add_foliage_volume(physics::FoliageVolume volume);
 
     void enqueue(EngineCommand command);
     void enqueue(InputAction action);

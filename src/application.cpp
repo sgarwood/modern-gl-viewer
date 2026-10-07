@@ -85,6 +85,13 @@ void configure_golf_session(Engine& engine, const AssetPaths& assets) {
             .motion(physics::MotionType::static_body)
             .at(physics::Position{{0.0F, -0.5F, 0.0F}})
             .build()));
+
+    // Add a tree!
+    engine.add_foliage_volume(physics::FoliageVolume{
+        .min = {-5.0f, 0.0f, -15.0f},
+        .max = {5.0f, 20.0f, -5.0f},
+        .density = 0.8f // 80% chance of branch collision
+    });
 }
 
 } // namespace
