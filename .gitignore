@@ -25,3 +25,6 @@
 # Platform metadata
 .DS_Store
 Thumbs.db
+
+# One-shot patch scripts kept out of the way rather than deleted.
+.archive/

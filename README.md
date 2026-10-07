@@ -39,7 +39,21 @@ types.
 - `MaterialInstance` keeps named texture bindings separate from immutable material pipelines.
 - RAII ownership for windows, GL buffers, vertex arrays, shaders, and programs.
 - Pimpl façades for `Application`, `Renderer`, and `ObjLoader`.
-- Headless Catch2 tests for camera math, asset loading, physics, and render orchestration.
+- World-space forward rendering with per-frame camera, sun, sky, fog, and wind state.
+- HDR RGBA16F scene target resolved through exposure, an ACES fit, sRGB, and a dither.
+- Preetham analytic daylight, a GGX/Smith metallic-roughness BRDF, and height-falloff
+  aerial perspective, all in absolute radiometric units.
+- A directional shadow pass with a comparison-sampled, Poisson-filtered lookup and a
+  texel-snapped light volume.
+- Generated course terrain that reproduces the physics heightmap across the green and
+  runs out to the horizon, with per-vertex surface classes and normal-tilted mower stripes.
+- GLSL `#include` with relative resolution, include-once, and cycle detection.
+- `mgv_capture`, an offscreen renderer that writes a PNG of the live course session.
+- Headless Catch2 tests for camera math, asset loading, physics, lighting, and render
+  orchestration.
+
+The rendering pipeline, shader contract, units, and the offscreen capture tool are
+documented in [`docs/rendering.md`](docs/rendering.md).
 
 The research and resulting design decisions are recorded in
 [`docs/research.md`](docs/research.md).
