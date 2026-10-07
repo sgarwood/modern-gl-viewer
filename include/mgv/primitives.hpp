@@ -63,6 +63,37 @@ struct SurfaceClass final {
 /// Builds the hole described by `description` as a single watertight mesh.
 [[nodiscard]] MeshData make_course_terrain(const CourseTerrainDescription& description);
 
+/// Builds a tapered cylinder standing on the origin along +Y, capped at both
+/// ends. `tex_coord.y` runs 0 at the base to 1 at the top.
+[[nodiscard]] MeshData make_cylinder(
+    float bottom_radius,
+    float top_radius,
+    float height,
+    int sides);
+
+/// Builds a cone standing on the origin along +Y.
+[[nodiscard]] MeshData make_cone(float radius, float height, int sides);
+
+/// Builds the flag end of a pin: a plain rectangle hanging from the stick,
+/// given a gentle curl so it does not read as a flat sheet of card.
+[[nodiscard]] MeshData make_flag(float width, float height, int segments);
+
+/// A broadleaf tree, as one mesh.
+///
+/// `tex_coord.x` marks material: 0 for bark, 1 for canopy, so a single shader
+/// can light both without a second draw call per tree.
+struct TreeDescription final {
+    float height{9.0F};
+    float trunk_radius{0.26F};
+    /// Stacked canopy masses, which read far better than one ball of leaves.
+    int canopy_lobes{5};
+    float canopy_radius{3.4F};
+    /// Seed for the per-tree variation in lobe placement and size.
+    unsigned int seed{1u};
+};
+
+[[nodiscard]] MeshData make_tree(const TreeDescription& description);
+
 /// Builds a flat, subdivided square in the XZ plane, centred on the origin and
 /// facing +Y. Subdivision exists so that per-vertex work and large triangles
 /// do not interpolate badly across the ground.

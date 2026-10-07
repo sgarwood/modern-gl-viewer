@@ -1,6 +1,7 @@
 #version 410 core
 #include "lib/uniforms.glsl"
 #include "lib/brdf.glsl"
+#include "lib/shadow.glsl"
 #include "lib/sky.glsl"
 #include "lib/fog.glsl"
 #include "lib/noise.glsl"
@@ -44,7 +45,8 @@ vec3 dimpled_normal(vec3 normal, vec3 object_position) {
 
 void main() {
     vec3 view = normalize(uCameraPosition - vWorldPosition);
-    vec3 normal = dimpled_normal(normalize(vWorldNormal), vObjectPosition);
+    vec3 geometric_normal = normalize(vWorldNormal);
+    vec3 normal = dimpled_normal(geometric_normal, vObjectPosition);
 
     Surface surface;
     surface.position = vWorldPosition;
@@ -57,7 +59,8 @@ void main() {
     surface.occlusion = 1.0;
 
     vec3 sun = normalize(uSunDirection);
-    vec3 radiance = direct_lighting(surface, sun, uSunColor, uSunIlluminance);
+    float visibility = sun_visibility(vWorldPosition, geometric_normal, sun, 2.0);
+    vec3 radiance = direct_lighting(surface, sun, uSunColor, uSunIlluminance) * visibility;
     radiance += hemisphere_ambient(
         surface, uSkyZenithColor, uSkyHorizonColor, uGroundAlbedo, uSkyIlluminance);
 

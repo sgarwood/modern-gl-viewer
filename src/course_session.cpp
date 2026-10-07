@@ -1,6 +1,9 @@
 #include "mgv/course_session.hpp"
 
 #include "mgv/obj_loader.hpp"
+
+#include <cstddef>
+#include <vector>
 #include "mgv/primitives.hpp"
 #include "mgv/shader_loader.hpp"
 
@@ -24,6 +27,57 @@ namespace {
 [[nodiscard]] std::shared_ptr<const MaterialInstance> instance_of(
     std::shared_ptr<const Material> material) {
     return std::make_shared<const MaterialInstance>(MaterialInstance{std::move(material)});
+}
+
+/// A prop instance, whose colour and roughness ride on the shared pipeline so
+/// that every painted object is one material and many instances.
+[[nodiscard]] std::shared_ptr<const MaterialInstance> painted(
+    const std::shared_ptr<const Material>& material,
+    Vec4 color_and_roughness) {
+    MaterialInstance instance{material};
+    instance.set_color("uBaseColorFactor", color_and_roughness);
+    return std::make_shared<const MaterialInstance>(std::move(instance));
+}
+
+[[nodiscard]] Transform placed(Vec3 position, float yaw_radians = 0.0F, float scale = 1.0F) {
+    Transform transform;
+    transform.set_position(position)
+        .set_rotation(Quaternion::from_axis_angle({0.0F, 1.0F, 0.0F}, yaw_radians))
+        .set_uniform_scale(scale);
+    return transform;
+}
+
+/// Where the trees stand. Clusters set back from the approach on both sides,
+/// framing the hole without ever overhanging the line of play.
+[[nodiscard]] std::vector<Vec3> tree_positions(const CourseTerrainDescription& terrain) {
+    std::vector<Vec3> positions;
+    unsigned int state{20'251'007u};
+    const auto random = [&state](float low, float high) {
+        state = state * 1664525u + 1013904223u;
+        const auto unit =
+            static_cast<float>((state >> 8u) & 0xFFFFFFu) / static_cast<float>(0x1000000u);
+        return low + unit * (high - low);
+    };
+
+    for (int index = 0; index < 54; ++index) {
+        const auto side = index % 2 == 0 ? -1.0F : 1.0F;
+        // Positive `along` runs down the approach, matching the convention
+        // course_surface_class uses, with a few trees set behind the green.
+        const auto along = random(-terrain.green_half_extent * 3.4F, terrain.approach_length * 1.05F);
+        const auto offset = terrain.approach_half_width + random(9.0F, 68.0F);
+        const Vec3 position{side * offset, 0.0F, -along};
+        // Nothing may stand on the putting surface.
+        if (std::sqrt(position.x * position.x + position.z * position.z) <
+            terrain.green_half_extent * 2.0F) {
+            continue;
+        }
+        positions.push_back({
+            position.x,
+            course_terrain_height(position.x, position.z, terrain) - 0.15F,
+            position.z,
+        });
+    }
+    return positions;
 }
 
 /// Merges every primitive of an imported model into one mesh.
@@ -69,14 +123,78 @@ EntityId configure_course_session(Engine& engine, const CourseSessionDescription
     const auto ball_material = std::make_shared<const Material>(std::move(ball_pipeline));
 
     Scene scene;
-    scene.add(Renderable{
+    Renderable sky{
         std::make_shared<const MeshData>(make_sky_dome(2'000.0F, 24, 48)),
         instance_of(sky_material),
-    });
+    };
+    // The dome is drawn around the camera, so casting it would put the whole
+    // world in shadow.
+    sky.set_casts_shadow(false);
+    scene.add(std::move(sky));
     scene.add(Renderable{
         std::make_shared<const MeshData>(make_course_terrain(description.terrain)),
         instance_of(turf_material),
     });
+    auto prop_pipeline = load_material(shaders, "prop")->pipeline();
+    prop_pipeline.rasterization.cull_mode = CullMode::none;
+    const auto prop_material = std::make_shared<const Material>(std::move(prop_pipeline));
+
+    auto foliage_pipeline = load_material(shaders, "foliage")->pipeline();
+    foliage_pipeline.rasterization.cull_mode = CullMode::back;
+    const auto foliage_material = std::make_shared<const Material>(std::move(foliage_pipeline));
+
+    // --- the pin ------------------------------------------------------------
+    // The hole sits a little off centre on the green, as a real pin position
+    // does, and the stick is the tallest thing for twenty metres, so it is
+    // what proves the shadow map is working.
+    const Vec3 hole{1.9F, 0.0F, -2.4F};
+    const auto hole_height = course_terrain_height(hole.x, hole.z, description.terrain);
+    constexpr float pin_height = 2.13F;
+
+    const auto cup = std::make_shared<const MeshData>(make_cylinder(0.054F, 0.054F, 0.11F, 16));
+    scene.add(Renderable{
+        cup,
+        painted(prop_material, {0.015F, 0.013F, 0.011F, 0.95F}),
+        placed({hole.x, hole_height - 0.105F, hole.z}),
+    });
+
+    const auto stick = std::make_shared<const MeshData>(
+        make_cylinder(0.011F, 0.009F, pin_height, 10));
+    scene.add(Renderable{
+        stick,
+        painted(prop_material, {0.62F, 0.62F, 0.60F, 0.42F}),
+        placed({hole.x, hole_height, hole.z}),
+    });
+
+    const auto flag = std::make_shared<const MeshData>(make_flag(0.46F, 0.34F, 7));
+    scene.add(Renderable{
+        flag,
+        painted(prop_material, {0.52F, 0.055F, 0.045F, 0.78F}),
+        placed({hole.x, hole_height + pin_height - 0.40F, hole.z}, 2.1F),
+    });
+
+    // --- trees --------------------------------------------------------------
+    // A handful of distinct meshes shared across many placements: enough
+    // variety that no two neighbours match, without a mesh per tree.
+    std::vector<std::shared_ptr<const MeshData>> tree_meshes;
+    for (unsigned int variant = 0; variant < 5; ++variant) {
+        tree_meshes.push_back(std::make_shared<const MeshData>(make_tree({
+            .height = 7.5F + static_cast<float>(variant) * 1.6F,
+            .trunk_radius = 0.22F + static_cast<float>(variant) * 0.035F,
+            .canopy_lobes = 5 + static_cast<int>(variant % 3),
+            .canopy_radius = 2.9F + static_cast<float>(variant) * 0.45F,
+            .seed = 7u + variant * 131u,
+        })));
+    }
+    std::size_t placement{};
+    for (const auto& position : tree_positions(description.terrain)) {
+        const auto& mesh = tree_meshes[placement % tree_meshes.size()];
+        const auto yaw = static_cast<float>(placement) * 1.37F;
+        const auto scale = 0.82F + static_cast<float>(placement % 7) * 0.07F;
+        scene.add(Renderable{mesh, instance_of(foliage_material), placed(position, yaw, scale)});
+        ++placement;
+    }
+
     const auto ball_index = scene.size();
     scene.add(Renderable{
         std::make_shared<const MeshData>(

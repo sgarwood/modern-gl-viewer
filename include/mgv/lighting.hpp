@@ -1,5 +1,7 @@
 #pragma once
 
+#include "mgv/camera.hpp"
+#include "mgv/clip_space.hpp"
 #include "mgv/mesh.hpp"
 
 namespace mgv {
@@ -41,6 +43,31 @@ struct Environment final {
 /// Normalizes `direction`, returning the default sun direction when the input
 /// has no usable length.
 [[nodiscard]] Vec3 normalized_light_direction(Vec3 direction) noexcept;
+
+/// The region a directional light's shadow map covers.
+struct ShadowVolume final {
+    /// Centre of the covered region, in world space.
+    Vec3 centre{};
+    /// Half the width of the covered region, in metres.
+    float radius{60.0F};
+    /// How far back from the centre the light starts, so that geometry
+    /// standing between the sun and the covered region still casts into it.
+    float caster_distance{300.0F};
+    /// Size of the shadow map in texels, used to snap the volume so that it
+    /// does not shimmer as the camera moves.
+    int resolution{2048};
+};
+
+/// Builds the view-projection matrix a directional light renders its shadow
+/// map with.
+///
+/// The volume is snapped to whole shadow-map texels along the light's own
+/// axes. Without that, every camera movement shifts the texel grid under the
+/// scene and the shadow edges crawl.
+[[nodiscard]] Mat4 directional_light_view_projection(
+    Vec3 light_direction,
+    const ShadowVolume& volume,
+    ClipSpaceConvention convention = {});
 
 /// Builds a sun direction from compass bearing and elevation, both in degrees.
 ///

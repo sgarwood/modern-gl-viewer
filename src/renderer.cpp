@@ -236,6 +236,7 @@ struct GpuRenderable final {
     BoundingSphere local_bounds;
     bool translucent{};
     bool visible{true};
+    bool casts_shadow{true};
 };
 
 struct QueuedRenderable final {
@@ -285,6 +286,7 @@ struct Renderer::Impl final {
     std::vector<QueuedRenderable> queue;
     Camera camera;
     Environment environment;
+    ShadowVolume shadow_volume;
     RenderStatistics statistics;
     bool scene_loaded{};
 };
@@ -402,6 +404,7 @@ std::vector<RenderableId> Renderer::set_scene(Scene scene) {
             .local_bounds = gpu_mesh.bounds,
             .translucent = renderable.material_instance()->material()->pipeline().blending.enabled,
             .visible = renderable.visible(),
+            .casts_shadow = renderable.casts_shadow(),
         });
     }
 
@@ -467,6 +470,14 @@ Environment Renderer::environment() const {
     return impl_->environment;
 }
 
+void Renderer::set_shadow_volume(ShadowVolume volume) {
+    impl_->shadow_volume = volume;
+}
+
+ShadowVolume Renderer::shadow_volume() const {
+    return impl_->shadow_volume;
+}
+
 void Renderer::render(const Frame& frame) {
     if (!impl_->scene_loaded) {
         throw std::logic_error{"Renderer assets have not been loaded"};
@@ -521,6 +532,44 @@ void Renderer::render(const Frame& frame) {
     resolved.view_projection = view_projection;
     resolved.camera_position = impl_->camera.position();
     resolved.environment = impl_->environment;
+
+    if (capabilities.directional_shadows) {
+        // Centre the shadow volume ahead of the camera rather than on it, so
+        // the covered region follows where the player is looking instead of
+        // wasting half its area behind them.
+        const auto& eye = impl_->camera.position();
+        const auto& look = impl_->camera.target();
+        const auto ahead_x = look.x - eye.x;
+        const auto ahead_z = look.z - eye.z;
+        const auto ahead_length = std::sqrt(ahead_x * ahead_x + ahead_z * ahead_z);
+        const auto offset = ahead_length > 1.0e-4F
+            ? impl_->shadow_volume.radius * 0.55F / ahead_length
+            : 0.0F;
+
+        auto volume = impl_->shadow_volume;
+        volume.centre = {eye.x + ahead_x * offset, 0.0F, eye.z + ahead_z * offset};
+        volume.resolution = capabilities.shadow_map_resolution;
+        resolved.sun_view_projection = directional_light_view_projection(
+            impl_->environment.sun.direction, volume, capabilities.clip_space);
+    }
+
+    if (capabilities.directional_shadows) {
+        impl_->backend->begin_shadow_pass(resolved);
+        for (const auto& renderable : impl_->renderables) {
+            if (!renderable.visible || !renderable.casts_shadow) {
+                continue;
+            }
+            impl_->backend->draw({
+                .mesh = *renderable.mesh,
+                .pipeline = *renderable.pipeline,
+                .model_view_projection =
+                    multiply(resolved.sun_view_projection, renderable.model_matrix),
+                .model = renderable.model_matrix,
+                .normal_matrix = renderable.normal_matrix,
+            });
+        }
+        impl_->backend->end_shadow_pass();
+    }
 
     const FrameScope frame_scope{*impl_->backend, resolved};
     for (const auto& item : impl_->queue) {

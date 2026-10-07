@@ -59,6 +59,10 @@ public:
     /// Replaces the sky, sun and fog state shared by every subsequent frame.
     void set_environment(Environment environment);
     [[nodiscard]] Environment environment() const;
+    /// Sets the extent of the region the sun's shadow map covers. The centre
+    /// is chosen per frame from where the camera is looking.
+    void set_shadow_volume(ShadowVolume volume);
+    [[nodiscard]] ShadowVolume shadow_volume() const;
     void render(const Frame& frame);
     [[nodiscard]] RenderStatistics last_frame_statistics() const noexcept;
 

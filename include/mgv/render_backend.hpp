@@ -38,6 +38,9 @@ struct Frame final {
     Mat4 view_projection{identity_matrix};
     Vec3 camera_position{};
     Environment environment{};
+    /// The matrix the sun's shadow map was rendered with. Meaningful only
+    /// when the backend reported shadow support.
+    Mat4 sun_view_projection{identity_matrix};
     /// World-space points where the ball has recently rolled, used to dry a
     /// track into wet turf. Owned by the caller for the duration of the frame.
     std::span<const Vec3> wet_trail{};
@@ -87,6 +90,12 @@ struct RenderBackendCapabilities final {
     ClipSpaceConvention clip_space;
     bool wireframe{};
     std::uint32_t max_sampled_textures{16};
+    /// Whether the backend can render a directional shadow map. A backend
+    /// that cannot simply never has a shadow pass driven against it.
+    bool directional_shadows{};
+    /// Side length of that shadow map in texels, needed to snap the light's
+    /// volume to the texel grid.
+    int shadow_map_resolution{2048};
 
     friend bool operator==(const RenderBackendCapabilities&, const RenderBackendCapabilities&) = default;
 };
@@ -111,8 +120,8 @@ struct DrawPacket final {
     /// Inverse transpose of `model`, in the upper-left 3x3 block, which keeps
     /// normals perpendicular under non-uniform scale.
     Mat4 normal_matrix{identity_matrix};
-    std::span<const SampledTextureBinding> textures;
-    std::span<const ColorBinding> colors;
+    std::span<const SampledTextureBinding> textures{};
+    std::span<const ColorBinding> colors{};
 };
 
 class RenderBackend {
@@ -131,6 +140,15 @@ public:
     virtual void begin_frame(const Frame& frame) = 0;
     virtual void draw(const DrawPacket& packet) = 0;
     virtual void end_frame() noexcept = 0;
+
+    /// Starts the directional shadow pass. Draws submitted between this and
+    /// `end_shadow_pass` record depth from the sun's point of view; their
+    /// pipeline and bindings are ignored, since only geometry matters.
+    ///
+    /// Backends without shadow support inherit a pass that does nothing, and
+    /// never have one driven against them.
+    virtual void begin_shadow_pass(const Frame&) {}
+    virtual void end_shadow_pass() noexcept {}
 
 protected:
     RenderBackend() = default;

@@ -1,6 +1,7 @@
 #version 410 core
 #include "lib/uniforms.glsl"
 #include "lib/brdf.glsl"
+#include "lib/shadow.glsl"
 #include "lib/sky.glsl"
 #include "lib/fog.glsl"
 #include "lib/noise.glsl"
@@ -126,7 +127,8 @@ void main() {
     surface.occlusion = mix(0.60, 0.86, mown);
 
     vec3 sun = normalize(uSunDirection);
-    vec3 radiance = direct_lighting(surface, sun, uSunColor, uSunIlluminance);
+    float visibility = sun_visibility(vWorldPosition, geometric_normal, sun, 2.6);
+    vec3 radiance = direct_lighting(surface, sun, uSunColor, uSunIlluminance) * visibility;
     radiance += hemisphere_ambient(
         surface, uSkyZenithColor, uSkyHorizonColor, uGroundAlbedo, uSkyIlluminance);
 

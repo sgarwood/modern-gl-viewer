@@ -98,6 +98,28 @@ private:
     GLuint name_{};
 };
 
+/// Restores whatever framebuffer was bound on entry.
+///
+/// The host owns the binding: QOpenGLWidget and the capture tool each render
+/// into a framebuffer of their own, so any setup that binds one of ours has
+/// to put theirs back rather than assuming framebuffer zero.
+class BoundFramebufferScope final {
+public:
+    BoundFramebufferScope() {
+        GLint bound{};
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &bound);
+        previous_ = static_cast<GLuint>(bound);
+    }
+    ~BoundFramebufferScope() { glBindFramebuffer(GL_FRAMEBUFFER, previous_); }
+    BoundFramebufferScope(const BoundFramebufferScope&) = delete;
+    BoundFramebufferScope& operator=(const BoundFramebufferScope&) = delete;
+    BoundFramebufferScope(BoundFramebufferScope&&) = delete;
+    BoundFramebufferScope& operator=(BoundFramebufferScope&&) = delete;
+
+private:
+    GLuint previous_{};
+};
+
 class Shader final {
 public:
     explicit Shader(GLenum type) : name_{glCreateShader(type)} {
@@ -422,6 +444,7 @@ public:
         }
         width_ = width;
         height_ = height;
+        const BoundFramebufferScope restore;
 
         glBindTexture(GL_TEXTURE_2D, color_.name());
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
@@ -441,7 +464,6 @@ public:
         glFramebufferRenderbuffer(
             GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depth_.get());
         complete_ = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
         return complete_;
     }
 
@@ -591,6 +613,123 @@ private:
     GLint viewport_{-1};
 };
 
+// ---------------------------------------------------------------------------
+// Directional shadow map
+// ---------------------------------------------------------------------------
+
+constexpr GLsizei shadow_map_resolution = 2048;
+
+constexpr std::string_view depth_vertex_source = R"(#version 410 core
+layout(location = 0) in vec3 aPosition;
+uniform mat4 uMvp;
+void main() {
+    gl_Position = uMvp * vec4(aPosition, 1.0);
+}
+)";
+
+constexpr std::string_view depth_fragment_source = R"(#version 410 core
+void main() {}
+)";
+
+/// A depth-only target rendered from the sun's point of view.
+///
+/// Geometry is drawn with a single trivial program rather than each surface's
+/// own: a shadow map records only where something is, and compiling a depth
+/// variant of every material would multiply the pipeline count for no gain.
+class ShadowMap final {
+public:
+    ShadowMap() {
+        const BoundFramebufferScope restore;
+        glGenTextures(1, &depth_texture_);
+        glBindTexture(GL_TEXTURE_2D, depth_texture_);
+        glTexImage2D(
+            GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
+            shadow_map_resolution, shadow_map_resolution, 0,
+            GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+        // Anything outside the covered region is lit, not shadowed.
+        constexpr std::array<GLfloat, 4> border{1.0F, 1.0F, 1.0F, 1.0F};
+        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border.data());
+        // Hardware comparison, so a bilinear fetch returns a filtered
+        // occlusion fraction rather than a filtered depth.
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_.get());
+        glFramebufferTexture2D(
+            GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth_texture_, 0);
+        glDrawBuffer(GL_NONE);
+        glReadBuffer(GL_NONE);
+        complete_ = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+
+        const auto vertex = compile_shader(
+            GL_VERTEX_SHADER, std::string{depth_vertex_source}, "shadow.vert");
+        const auto fragment = compile_shader(
+            GL_FRAGMENT_SHADER, std::string{depth_fragment_source}, "shadow.frag");
+        glAttachShader(program_.get(), vertex.get());
+        glAttachShader(program_.get(), fragment.get());
+        glLinkProgram(program_.get());
+        GLint linked{};
+        glGetProgramiv(program_.get(), GL_LINK_STATUS, &linked);
+        if (linked != GL_TRUE) {
+            throw std::runtime_error{"Shadow shader link failed:\n" + program_log(program_.get())};
+        }
+        mvp_location_ = glGetUniformLocation(program_.get(), "uMvp");
+    }
+
+    ~ShadowMap() { glDeleteTextures(1, &depth_texture_); }
+    ShadowMap(const ShadowMap&) = delete;
+    ShadowMap& operator=(const ShadowMap&) = delete;
+    ShadowMap(ShadowMap&&) = delete;
+    ShadowMap& operator=(ShadowMap&&) = delete;
+
+    [[nodiscard]] bool complete() const noexcept { return complete_; }
+    [[nodiscard]] GLuint depth_texture() const noexcept { return depth_texture_; }
+
+    void begin() const {
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_.get());
+        glViewport(0, 0, shadow_map_resolution, shadow_map_resolution);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+        // Front-face culling moves acne onto surfaces the camera cannot see.
+        // Combined with a slope-scaled offset it keeps thin geometry from
+        // detaching from its own shadow.
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_FRONT);
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(2.4F, 4.0F);
+        glClear(GL_DEPTH_BUFFER_BIT);
+        glUseProgram(program_.get());
+    }
+
+    void draw(const OpenGlMesh& mesh, const Mat4& model_view_projection) const {
+        if (mvp_location_ >= 0) {
+            glUniformMatrix4fv(mvp_location_, 1, GL_FALSE, model_view_projection.data());
+        }
+        glBindVertexArray(mesh.vertex_array());
+        glDrawElements(GL_TRIANGLES, mesh.index_count(), GL_UNSIGNED_INT, nullptr);
+        glBindVertexArray(0);
+    }
+
+    static void end() noexcept {
+        glDisable(GL_POLYGON_OFFSET_FILL);
+        glCullFace(GL_BACK);
+    }
+
+private:
+    Framebuffer framebuffer_;
+    Program program_;
+    GLuint depth_texture_{};
+    GLint mvp_location_{-1};
+    bool complete_{};
+};
+
 /// The uniforms every mgv shader may declare. A shader that omits one simply
 /// does not receive it, which keeps the minimal viewer shaders valid.
 enum class StandardUniform : std::size_t {
@@ -616,6 +755,9 @@ enum class StandardUniform : std::size_t {
     wind_direction,
     surface_wetness,
     viewport_size,
+    sun_view_projection,
+    shadow_map,
+    shadow_texel_size,
     trail_count,
     trail_positions,
 };
@@ -643,6 +785,9 @@ constexpr std::array standard_uniform_names{
     "uWindDirection",
     "uSurfaceWetness",
     "uViewportSize",
+    "uSunViewProjection",
+    "uShadowMap",
+    "uShadowTexelSize",
     "uTrailCount",
     "uTrailPositions",
 };
@@ -729,13 +874,26 @@ public:
         glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &fragment_units);
         const auto units = std::min(vertex_units, fragment_units);
         max_sampled_textures_ = units > 0 ? static_cast<std::uint32_t>(units) : 0;
+
+        try {
+            shadow_map_.emplace();
+            shadows_available_ = shadow_map_->complete() && max_sampled_textures_ > 1;
+        } catch (const std::exception&) {
+            // A driver that cannot give us a depth target still renders, just
+            // without shadows.
+            shadow_map_.reset();
+            shadows_available_ = false;
+        }
     }
 
     [[nodiscard]] RenderBackendCapabilities capabilities() const noexcept override {
         return {
             .clip_space = {},
             .wireframe = true,
-            .max_sampled_textures = max_sampled_textures_,
+            // One unit is reserved for the shadow map.
+            .max_sampled_textures = max_sampled_textures_ > 0 ? max_sampled_textures_ - 1 : 0,
+            .directional_shadows = shadows_available_,
+            .shadow_map_resolution = shadow_map_resolution,
         };
     }
 
@@ -785,6 +943,27 @@ public:
         glDepthMask(GL_TRUE);
         glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    }
+
+    void begin_shadow_pass(const Frame& frame) override {
+        if (!shadows_available_) {
+            return;
+        }
+        frame_ = frame;
+        GLint bound{};
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &bound);
+        output_framebuffer_ = static_cast<GLuint>(bound);
+        in_shadow_pass_ = true;
+        shadow_map_->begin();
+    }
+
+    void end_shadow_pass() noexcept override {
+        if (!in_shadow_pass_) {
+            return;
+        }
+        ShadowMap::end();
+        in_shadow_pass_ = false;
+        glBindFramebuffer(GL_FRAMEBUFFER, output_framebuffer_);
     }
 
     /// Uploads whichever standard uniforms `pipeline` declares. Called once per
@@ -840,6 +1019,18 @@ public:
                 static_cast<float>(frame_.framebuffer_height));
         }
 
+        matrix(StandardUniform::sun_view_projection, frame_.sun_view_projection);
+        scalar(StandardUniform::shadow_texel_size, 1.0F / static_cast<float>(shadow_map_resolution));
+        const auto shadow_location = pipeline.standard_uniform(StandardUniform::shadow_map);
+        if (shadow_location >= 0 && shadows_available_) {
+            const auto unit = shadow_map_unit();
+            glActiveTexture(GL_TEXTURE0 + unit);
+            glBindTexture(GL_TEXTURE_2D, shadow_map_->depth_texture());
+            glBindSampler(unit, 0);
+            glUniform1i(shadow_location, static_cast<GLint>(unit));
+            glActiveTexture(GL_TEXTURE0);
+        }
+
         const auto count_location = pipeline.standard_uniform(StandardUniform::trail_count);
         const auto point_count = static_cast<GLsizei>(trail_.size() / 3);
         if (count_location >= 0) {
@@ -853,6 +1044,10 @@ public:
 
     void draw(const DrawPacket& packet) override {
         const auto& gl_mesh = backend_resource<OpenGlMesh>(packet.mesh, "mesh");
+        if (in_shadow_pass_) {
+            shadow_map_->draw(gl_mesh, packet.model_view_projection);
+            return;
+        }
         const auto& pipeline = backend_resource<OpenGlPipeline>(packet.pipeline, "pipeline");
 
         if (pipeline.depth().test_enabled) {
@@ -954,7 +1149,16 @@ public:
     }
 
 private:
+    /// The shadow map lives on the last unit the driver offers, above every
+    /// unit a material is allowed to claim.
+    [[nodiscard]] GLuint shadow_map_unit() const noexcept {
+        return max_sampled_textures_ > 0 ? max_sampled_textures_ - 1 : 0;
+    }
+
     std::uint32_t max_sampled_textures_{};
+    std::optional<ShadowMap> shadow_map_;
+    bool shadows_available_{};
+    bool in_shadow_pass_{};
     Frame frame_;
     std::vector<float> trail_;
     HdrTarget hdr_target_;

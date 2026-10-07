@@ -51,3 +51,133 @@ TEST_CASE("a sun at altitude keeps a unit length") {
     CHECK(length(direction) == Catch::Approx(1.0F));
     CHECK(direction.y == Catch::Approx(std::sin(40.0F * 3.14159265F / 180.0F)).epsilon(1.0e-4F));
 }
+
+namespace {
+
+[[nodiscard]] mgv::Vec3 project(const mgv::Mat4& m, const mgv::Vec3& p) {
+    const auto x = m[0] * p.x + m[4] * p.y + m[8] * p.z + m[12];
+    const auto y = m[1] * p.x + m[5] * p.y + m[9] * p.z + m[13];
+    const auto z = m[2] * p.x + m[6] * p.y + m[10] * p.z + m[14];
+    const auto w = m[3] * p.x + m[7] * p.y + m[11] * p.z + m[15];
+    return {x / w, y / w, z / w};
+}
+
+} // namespace
+
+TEST_CASE("a directional light's shadow volume contains everything it covers") {
+    mgv::ShadowVolume volume;
+    volume.centre = {12.0F, 0.0F, -30.0F};
+    volume.radius = 40.0F;
+    const auto matrix = mgv::directional_light_view_projection(
+        mgv::sun_direction_from_angles(140.0F, 45.0F), volume);
+
+    // Sample the corners of the covered region at ground level and overhead.
+    for (const auto dx : {-1.0F, 1.0F}) {
+        for (const auto dz : {-1.0F, 1.0F}) {
+            for (const auto height : {0.0F, 15.0F}) {
+                const mgv::Vec3 point{
+                    volume.centre.x + dx * volume.radius * 0.7F,
+                    height,
+                    volume.centre.z + dz * volume.radius * 0.7F,
+                };
+                const auto clip = project(matrix, point);
+                CHECK(std::abs(clip.x) <= 1.0F);
+                CHECK(std::abs(clip.y) <= 1.0F);
+                CHECK(clip.z >= -1.0F);
+                CHECK(clip.z <= 1.0F);
+            }
+        }
+    }
+}
+
+TEST_CASE("an orthographic light projection preserves parallel spacing") {
+    mgv::ShadowVolume volume;
+    volume.radius = 50.0F;
+    const auto matrix = mgv::directional_light_view_projection(
+        mgv::Vec3{0.0F, 1.0F, 0.0F}, volume);
+
+    // Under an orthographic projection, equal world steps give equal clip
+    // steps no matter how far away they are.
+    const auto near_step =
+        project(matrix, {10.0F, 0.0F, 0.0F}).x - project(matrix, {0.0F, 0.0F, 0.0F}).x;
+    const auto far_step =
+        project(matrix, {10.0F, 40.0F, 0.0F}).x - project(matrix, {0.0F, 40.0F, 0.0F}).x;
+
+    CHECK(near_step == Catch::Approx(far_step).epsilon(1.0e-5F));
+}
+
+TEST_CASE("the shadow volume snaps to whole texels so its edges do not crawl") {
+    mgv::ShadowVolume volume;
+    volume.radius = 32.0F;
+    volume.resolution = 1024;
+    const auto direction = mgv::sun_direction_from_angles(135.0F, 50.0F);
+
+    // Moving the volume may only ever shift the shadow map by a whole number
+    // of texels. Any fractional shift is what makes shadow edges crawl, and a
+    // sub-texel camera movement is the case that exposes it: the quantised
+    // offset is then either zero or exactly one texel, never in between.
+    const auto texel = 2.0F * volume.radius / static_cast<float>(volume.resolution);
+    const auto texels_per_clip_unit = static_cast<float>(volume.resolution) * 0.5F;
+    const mgv::Vec3 probe{5.0F, 1.0F, -7.0F};
+
+    const auto before = project(
+        mgv::directional_light_view_projection(direction, volume), probe);
+    for (const auto fraction : {0.1F, 0.3F, 0.5F, 0.9F, 1.4F}) {
+        auto nudged = volume;
+        nudged.centre = {texel * fraction, 0.0F, texel * fraction * 0.5F};
+        const auto after = project(
+            mgv::directional_light_view_projection(direction, nudged), probe);
+
+        for (const auto shift : {(after.x - before.x) * texels_per_clip_unit,
+                                 (after.y - before.y) * texels_per_clip_unit}) {
+            CHECK(shift == Catch::Approx(std::round(shift)).margin(1.0e-3F));
+        }
+    }
+}
+
+TEST_CASE("a light pointing straight down still produces a usable basis") {
+    mgv::ShadowVolume volume;
+    const auto matrix = mgv::directional_light_view_projection({0.0F, 1.0F, 0.0F}, volume);
+
+    const auto clip = project(matrix, {0.0F, 0.0F, 0.0F});
+    CHECK(std::abs(clip.x) <= 1.0F);
+    CHECK(std::abs(clip.y) <= 1.0F);
+}
+
+TEST_CASE("a point nearer the sun records nearer in the shadow map") {
+    mgv::ShadowVolume volume;
+    volume.radius = 50.0F;
+    const auto direction = mgv::sun_direction_from_angles(150.0F, 35.0F);
+    const auto matrix = mgv::directional_light_view_projection(direction, volume);
+
+    // Walking from the ground towards the sun must decrease the recorded
+    // depth monotonically. If it increases, the depth test can never find an
+    // occluder and nothing in the scene ever casts a shadow -- a failure that
+    // containment and orthographic-spacing checks both pass straight through.
+    auto previous = project(matrix, {0.0F, 0.0F, 0.0F}).z;
+    for (const auto step : {2.0F, 6.0F, 12.0F, 25.0F}) {
+        const mgv::Vec3 towards_sun{
+            direction.x * step,
+            direction.y * step,
+            direction.z * step,
+        };
+        const auto depth = project(matrix, towards_sun).z;
+        CHECK(depth < previous);
+        previous = depth;
+    }
+}
+
+TEST_CASE("the shadow volume reaches above its own ground plane") {
+    mgv::ShadowVolume volume;
+    volume.radius = 60.0F;
+    const auto matrix = mgv::directional_light_view_projection(
+        mgv::sun_direction_from_angles(120.0F, 20.0F), volume);
+
+    // A tall tree standing at the centre has to fit, or its crown is clipped
+    // out of the map and casts nothing.
+    for (const auto height : {0.0F, 5.0F, 12.0F, 24.0F}) {
+        const auto clip = project(matrix, {0.0F, height, 0.0F});
+        CHECK(clip.z >= -1.0F);
+        CHECK(clip.z <= 1.0F);
+    }
+}

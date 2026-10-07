@@ -52,6 +52,15 @@ Renderable& Renderable::set_transform(Transform value) noexcept {
     return *this;
 }
 
+bool Renderable::casts_shadow() const noexcept {
+    return casts_shadow_;
+}
+
+Renderable& Renderable::set_casts_shadow(bool value) noexcept {
+    casts_shadow_ = value;
+    return *this;
+}
+
 Renderable& Renderable::set_visible(bool value) noexcept {
     visible_ = value;
     return *this;

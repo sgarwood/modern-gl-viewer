@@ -4,6 +4,7 @@
 #include <cmath>
 #include <numbers>
 #include <stdexcept>
+#include <vector>
 
 namespace mgv {
 namespace {
@@ -306,6 +307,190 @@ MeshData make_course_terrain(const CourseTerrainDescription& description) {
         previous_loop = current_loop;
     }
 
+    return mesh;
+}
+
+
+namespace {
+
+/// Appends a radially symmetric surface of revolution given its profile.
+///
+/// Each profile entry is a radius and a height; consecutive entries are
+/// joined into a band. Normals come from the profile's own slope, so a cone
+/// and a cylinder both shade correctly without a special case.
+void append_revolution(
+    MeshData& mesh,
+    const std::vector<Vec2>& profile,
+    int sides,
+    float material,
+    Vec3 offset = {}) {
+    if (profile.size() < 2 || sides < 3) {
+        return;
+    }
+    const auto first_vertex = static_cast<std::uint32_t>(mesh.vertices.size());
+    const auto stride = static_cast<std::uint32_t>(sides + 1);
+
+    for (std::size_t level = 0; level < profile.size(); ++level) {
+        const auto radius = profile[level].x;
+        const auto height = profile[level].y;
+        // Slope of the profile at this level, for the normal's vertical part.
+        const auto previous = profile[level == 0 ? 0 : level - 1];
+        const auto next = profile[std::min(level + 1, profile.size() - 1)];
+        const auto run = next.x - previous.x;
+        const auto rise = next.y - previous.y;
+        const auto slope_length = std::sqrt(run * run + rise * rise);
+        const auto normal_radial = slope_length > 1.0e-6F ? rise / slope_length : 1.0F;
+        const auto normal_up = slope_length > 1.0e-6F ? -run / slope_length : 0.0F;
+
+        for (int side = 0; side <= sides; ++side) {
+            const auto angle = 2.0F * pi * static_cast<float>(side) / static_cast<float>(sides);
+            const auto cosine = std::cos(angle);
+            const auto sine = std::sin(angle);
+            const Vec3 normal{normal_radial * cosine, normal_up, normal_radial * sine};
+            const auto length =
+                std::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+            mesh.vertices.push_back({
+                .position = {offset.x + radius * cosine, offset.y + height, offset.z + radius * sine},
+                .normal = length > 1.0e-6F
+                    ? Vec3{normal.x / length, normal.y / length, normal.z / length}
+                    : Vec3{0.0F, 1.0F, 0.0F},
+                .tex_coord = {
+                    material,
+                    static_cast<float>(level) / static_cast<float>(profile.size() - 1),
+                },
+            });
+        }
+    }
+
+    for (std::size_t level = 0; level + 1 < profile.size(); ++level) {
+        for (int side = 0; side < sides; ++side) {
+            const auto base = first_vertex + static_cast<std::uint32_t>(level) * stride +
+                              static_cast<std::uint32_t>(side);
+            mesh.indices.insert(mesh.indices.end(), {
+                base, base + stride, base + 1,
+                base + 1, base + stride, base + stride + 1,
+            });
+        }
+    }
+}
+
+/// A small deterministic generator, so a given tree seed always produces the
+/// same tree on every machine and in every run.
+class Rng final {
+public:
+    explicit Rng(unsigned int seed) : state_{seed == 0u ? 1u : seed} {}
+
+    [[nodiscard]] float next(float low, float high) {
+        state_ = state_ * 1664525u + 1013904223u;
+        const auto unit = static_cast<float>((state_ >> 8u) & 0xFFFFFFu) /
+                          static_cast<float>(0x1000000u);
+        return low + unit * (high - low);
+    }
+
+private:
+    unsigned int state_{};
+};
+
+} // namespace
+
+MeshData make_cylinder(float bottom_radius, float top_radius, float height, int sides) {
+    if (height <= 0.0F || sides < 3) {
+        throw std::invalid_argument{"A cylinder needs a positive height and at least 3 sides"};
+    }
+    MeshData mesh;
+    append_revolution(mesh, {{0.0F, 0.0F}, {bottom_radius, 0.0F},
+                             {top_radius, height}, {0.0F, height}}, sides, 0.0F);
+    return mesh;
+}
+
+MeshData make_cone(float radius, float height, int sides) {
+    if (radius <= 0.0F || height <= 0.0F || sides < 3) {
+        throw std::invalid_argument{"A cone needs a positive radius, height, and 3 sides"};
+    }
+    MeshData mesh;
+    append_revolution(mesh, {{0.0F, 0.0F}, {radius, 0.0F}, {0.0F, height}}, sides, 0.0F);
+    return mesh;
+}
+
+MeshData make_flag(float width, float height, int segments) {
+    if (width <= 0.0F || height <= 0.0F || segments < 1) {
+        throw std::invalid_argument{"A flag needs a positive size and at least one segment"};
+    }
+    MeshData mesh;
+    const auto stride = static_cast<std::uint32_t>(segments + 1);
+    for (int row = 0; row <= 1; ++row) {
+        for (int column = 0; column <= segments; ++column) {
+            const auto u = static_cast<float>(column) / static_cast<float>(segments);
+            // A shallow curl away from the stick, deepening along its length.
+            const auto curl = std::sin(u * pi * 1.3F) * width * 0.16F;
+            mesh.vertices.push_back({
+                .position = {u * width, static_cast<float>(row) * height, curl},
+                .normal = {0.0F, 0.0F, 1.0F},
+                .tex_coord = {u, static_cast<float>(row)},
+            });
+        }
+    }
+    for (int column = 0; column < segments; ++column) {
+        const auto base = static_cast<std::uint32_t>(column);
+        mesh.indices.insert(mesh.indices.end(), {
+            base, base + stride, base + 1,
+            base + 1, base + stride, base + stride + 1,
+        });
+    }
+    return mesh;
+}
+
+MeshData make_tree(const TreeDescription& description) {
+    if (description.height <= 0.0F || description.trunk_radius <= 0.0F) {
+        throw std::invalid_argument{"A tree needs a positive height and trunk radius"};
+    }
+    if (description.canopy_lobes < 1 || description.canopy_radius <= 0.0F) {
+        throw std::invalid_argument{"A tree needs at least one canopy lobe"};
+    }
+
+    Rng rng{description.seed};
+    MeshData mesh;
+
+    // The trunk tapers and continues a little way into the canopy, so the
+    // crown does not look balanced on a pole.
+    const auto trunk_height = description.height * 0.62F;
+    append_revolution(
+        mesh,
+        {{0.0F, 0.0F},
+         {description.trunk_radius * 1.35F, 0.0F},
+         {description.trunk_radius, trunk_height * 0.35F},
+         {description.trunk_radius * 0.55F, trunk_height},
+         {0.0F, trunk_height}},
+        9,
+        0.0F);
+
+    // Canopy lobes: flattened spheres of revolution, scattered around the top
+    // of the trunk. Overlapping masses read as foliage where a single sphere
+    // reads as a lollipop.
+    for (int lobe = 0; lobe < description.canopy_lobes; ++lobe) {
+        const auto radius = description.canopy_radius * rng.next(0.55F, 1.0F);
+        const auto angle = rng.next(0.0F, 2.0F * pi);
+        const auto spread = description.canopy_radius * rng.next(0.0F, 0.62F);
+        const Vec3 centre{
+            std::cos(angle) * spread,
+            trunk_height * rng.next(0.72F, 1.0F) + description.height * rng.next(0.08F, 0.30F),
+            std::sin(angle) * spread,
+        };
+
+        constexpr int levels = 7;
+        std::vector<Vec2> profile;
+        profile.reserve(levels + 1);
+        for (int level = 0; level <= levels; ++level) {
+            const auto t = static_cast<float>(level) / static_cast<float>(levels);
+            const auto polar = t * pi;
+            profile.push_back({
+                radius * std::sin(polar),
+                // Flattened vertically: a canopy is wider than it is deep.
+                -radius * 0.78F * std::cos(polar),
+            });
+        }
+        append_revolution(mesh, profile, 9, 1.0F, centre);
+    }
     return mesh;
 }
 
