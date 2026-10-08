@@ -713,27 +713,34 @@ public:
     ShadowMap() {
         const BoundFramebufferScope restore;
         glGenTextures(1, &depth_texture_);
-        glBindTexture(GL_TEXTURE_2D, depth_texture_);
-        glTexImage2D(
-            GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
-            shadow_map_resolution, shadow_map_resolution, 0,
-            GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, depth_texture_);
+        glTexImage3D(
+            GL_TEXTURE_2D_ARRAY,
+            0,
+            GL_DEPTH_COMPONENT24,
+            shadow_map_resolution,
+            shadow_map_resolution,
+            static_cast<GLsizei>(maximum_shadow_cascades),
+            0,
+            GL_DEPTH_COMPONENT,
+            GL_FLOAT,
+            nullptr);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
         // Anything outside the covered region is lit, not shadowed.
         constexpr std::array<GLfloat, 4> border{1.0F, 1.0F, 1.0F, 1.0F};
-        glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border.data());
+        glTexParameterfv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BORDER_COLOR, border.data());
         // Hardware comparison, so a bilinear fetch returns a filtered
         // occlusion fraction rather than a filtered depth.
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
-        glBindTexture(GL_TEXTURE_2D, 0);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_.get());
-        glFramebufferTexture2D(
-            GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth_texture_, 0);
+        glFramebufferTextureLayer(
+            GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depth_texture_, 0, 0);
         glDrawBuffer(GL_NONE);
         glReadBuffer(GL_NONE);
         complete_ = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
@@ -762,8 +769,17 @@ public:
     [[nodiscard]] bool complete() const noexcept { return complete_; }
     [[nodiscard]] GLuint depth_texture() const noexcept { return depth_texture_; }
 
-    void begin() const {
+    void begin(std::uint32_t cascade_index) const {
+        if (cascade_index >= maximum_shadow_cascades) {
+            throw std::out_of_range{"OpenGL shadow cascade index is out of range"};
+        }
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_.get());
+        glFramebufferTextureLayer(
+            GL_FRAMEBUFFER,
+            GL_DEPTH_ATTACHMENT,
+            depth_texture_,
+            0,
+            static_cast<GLint>(cascade_index));
         glViewport(0, 0, shadow_map_resolution, shadow_map_resolution);
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LESS);
@@ -829,6 +845,9 @@ enum class StandardUniform : std::size_t {
     surface_wetness,
     viewport_size,
     sun_view_projection,
+    sun_view_projections,
+    shadow_cascade_splits,
+    shadow_cascade_count,
     shadow_map,
     shadow_texel_size,
     trail_count,
@@ -859,6 +878,9 @@ constexpr std::array standard_uniform_names{
     "uSurfaceWetness",
     "uViewportSize",
     "uSunViewProjection",
+    "uSunViewProjections[0]",
+    "uShadowCascadeSplits[0]",
+    "uShadowCascadeCount",
     "uShadowMap",
     "uShadowTexelSize",
     "uTrailCount",
@@ -1033,7 +1055,7 @@ public:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     }
 
-    void begin_shadow_pass(const Frame& frame) override {
+    void begin_shadow_pass(const Frame& frame, std::uint32_t cascade_index) override {
         if (!shadows_available_) {
             return;
         }
@@ -1042,7 +1064,7 @@ public:
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &bound);
         output_framebuffer_ = static_cast<GLuint>(bound);
         in_shadow_pass_ = true;
-        shadow_map_->begin();
+        shadow_map_->begin(cascade_index);
     }
 
     void end_shadow_pass() noexcept override {
@@ -1108,12 +1130,36 @@ public:
         }
 
         matrix(StandardUniform::sun_view_projection, frame_.sun_view_projection);
+        const auto cascade_count = std::min(
+            frame_.sun_cascade_count, maximum_shadow_cascades);
+        const auto cascade_matrices =
+            pipeline.standard_uniform(StandardUniform::sun_view_projections);
+        if (cascade_matrices >= 0 && cascade_count > 0) {
+            glUniformMatrix4fv(
+                cascade_matrices,
+                static_cast<GLsizei>(cascade_count),
+                GL_FALSE,
+                frame_.sun_view_projections.front().data());
+        }
+        const auto cascade_splits =
+            pipeline.standard_uniform(StandardUniform::shadow_cascade_splits);
+        if (cascade_splits >= 0 && cascade_count > 0) {
+            glUniform1fv(
+                cascade_splits,
+                static_cast<GLsizei>(cascade_count),
+                frame_.sun_cascade_splits.data());
+        }
+        const auto cascade_count_location =
+            pipeline.standard_uniform(StandardUniform::shadow_cascade_count);
+        if (cascade_count_location >= 0) {
+            glUniform1i(cascade_count_location, static_cast<GLint>(cascade_count));
+        }
         scalar(StandardUniform::shadow_texel_size, 1.0F / static_cast<float>(shadow_map_resolution));
         const auto shadow_location = pipeline.standard_uniform(StandardUniform::shadow_map);
         if (shadow_location >= 0 && shadows_available_) {
             const auto unit = shadow_map_unit();
             glActiveTexture(GL_TEXTURE0 + unit);
-            glBindTexture(GL_TEXTURE_2D, shadow_map_->depth_texture());
+            glBindTexture(GL_TEXTURE_2D_ARRAY, shadow_map_->depth_texture());
             glBindSampler(unit, 0);
             glUniform1i(shadow_location, static_cast<GLint>(unit));
             glActiveTexture(GL_TEXTURE0);

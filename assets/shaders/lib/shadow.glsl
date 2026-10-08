@@ -6,8 +6,11 @@
 // penumbra to something closer to a real sun, whose disc subtends about half
 // a degree, without the cost of a true blocker search.
 
-uniform mat4 uSunViewProjection;
-uniform sampler2DShadow uShadowMap;
+const int kMaxShadowCascades = 4;
+uniform mat4 uSunViewProjections[kMaxShadowCascades];
+uniform float uShadowCascadeSplits[kMaxShadowCascades];
+uniform int uShadowCascadeCount;
+uniform sampler2DArrayShadow uShadowMap;
 uniform float uShadowTexelSize;
 
 const vec2 kPoissonTaps[8] = vec2[8](
@@ -18,6 +21,19 @@ const vec2 kPoissonTaps[8] = vec2[8](
 
 /// Fraction of the sun reaching a point: 1 fully lit, 0 fully occluded.
 float sun_visibility(vec3 world_position, vec3 normal, vec3 sun_direction, float softness) {
+    if (uShadowCascadeCount <= 0) {
+        return 1.0;
+    }
+
+    float view_depth = -(uView * vec4(world_position, 1.0)).z;
+    int cascade = uShadowCascadeCount - 1;
+    for (int index = 0; index < uShadowCascadeCount; ++index) {
+        if (view_depth <= uShadowCascadeSplits[index]) {
+            cascade = index;
+            break;
+        }
+    }
+
     // Offset along the normal before projecting. A depth bias alone has to
     // grow with the surface's slope to the light, and at grazing angles that
     // bias is large enough to detach contact shadows; moving along the normal
@@ -25,7 +41,7 @@ float sun_visibility(vec3 world_position, vec3 normal, vec3 sun_direction, float
     float slope = clamp(1.0 - dot(normal, sun_direction), 0.0, 1.0);
     vec3 offset = world_position + normal * (0.03 + 0.28 * slope);
 
-    vec4 light_clip = uSunViewProjection * vec4(offset, 1.0);
+    vec4 light_clip = uSunViewProjections[cascade] * vec4(offset, 1.0);
     if (light_clip.w <= 0.0) {
         return 1.0;
     }
@@ -46,7 +62,9 @@ float sun_visibility(vec3 world_position, vec3 normal, vec3 sun_direction, float
         vec2 tap = vec2(
             kPoissonTaps[i].x * rotation.x - kPoissonTaps[i].y * rotation.y,
             kPoissonTaps[i].x * rotation.y + kPoissonTaps[i].y * rotation.x);
-        visibility += texture(uShadowMap, vec3(coordinate.xy + tap * radius, coordinate.z));
+        visibility += texture(
+            uShadowMap,
+            vec4(coordinate.xy + tap * radius, float(cascade), coordinate.z));
     }
     visibility *= 0.125;
 
