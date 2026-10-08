@@ -147,14 +147,26 @@ def main():
     
 
     
-    ik = target.pose.bones["LowerArm.R"].constraints.new('IK')
-    ik.target = target
-    ik.subtarget = "Palm.L"
-    ik.chain_count = 2
+    # Create an empty to act as the right hand IK target (offset from Palm.L)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.empty_add(type='PLAIN_AXES')
+    ik_target = bpy.context.active_object
+    ik_target.name = 'RightHandGrip'
     
-    rot = target.pose.bones["Palm.R"].constraints.new('COPY_ROTATION')
-    rot.target = target
-    rot.subtarget = "Palm.L"
+    # Parent it to Palm.L
+    copy_trans = ik_target.constraints.new('COPY_TRANSFORMS')
+    copy_trans.target = target
+    copy_trans.subtarget = 'Palm.L'
+    
+    # Offset the right hand down the club shaft (local -Z) and slightly outwards
+    ik_target.delta_location = (0.0, 0.0, -0.1) # adjust as needed (0.1 units down)
+    
+    bpy.context.view_layer.objects.active = target
+    bpy.ops.object.mode_set(mode='POSE')
+    
+    ik = target.pose.bones["LowerArm.R"].constraints.new('IK')
+    ik.target = ik_target
+    ik.chain_count = 2
 
     lowest = []
     ground_rest = min(
@@ -267,6 +279,9 @@ def main():
     scene.frame_start, scene.frame_end = 1, end - start + 1
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.data.objects.remove(source, do_unlink=True)
+    ik_empty = bpy.data.objects.get('RightHandGrip')
+    if ik_empty:
+        bpy.data.objects.remove(ik_empty, do_unlink=True)
     bpy.ops.object.select_all(action="DESELECT")
     bpy.ops.export_scene.gltf(filepath=str(out), export_format="GLB",
                               export_animations=True, export_skins=True,
