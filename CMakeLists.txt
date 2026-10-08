@@ -81,6 +81,7 @@ add_library(mgv_core
     src/camera.cpp
     src/camera_controller.cpp
     src/compass.cpp
+    src/gltf_loader.cpp
     src/image_loader.cpp
     src/lighting.cpp
     src/material.cpp
@@ -402,6 +403,7 @@ if(BUILD_TESTING)
         tests/engine_test.cpp
         tests/game/round_test.cpp
         tests/golf/shot_model_test.cpp
+        tests/gltf_loader_test.cpp
         tests/image_loader_test.cpp
         tests/lighting_test.cpp
         tests/obj_loader_test.cpp

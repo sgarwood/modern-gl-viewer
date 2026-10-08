@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -58,15 +59,38 @@ struct MeshInstance final {
     friend bool operator==(const MeshInstance&, const MeshInstance&) = default;
 };
 
+/// How one vertex is attached to a skeleton.
+///
+/// Held in a stream of its own rather than widened into `Vertex`, because
+/// almost nothing in a golf course is skinned. Terrain, grass, trees and
+/// leaves would all pay twenty bytes a vertex for four joint indices and
+/// four weights they never use.
+struct SkinningVertex final {
+    /// Indices into the skin's joint list. Four influences is what glTF's
+    /// JOINTS_0 and every linear-blend implementation agree on.
+    std::array<std::uint16_t, 4> joints{};
+    /// Weights, which glTF requires to sum to one.
+    std::array<float, 4> weights{1.0F, 0.0F, 0.0F, 0.0F};
+
+    friend bool operator==(const SkinningVertex&, const SkinningVertex&) = default;
+};
+
 struct MeshData final {
     std::vector<Vertex> vertices;
     std::vector<std::uint32_t> indices;
     /// Placements of this mesh. Empty means a single placement at the origin,
     /// which is what every ordinary mesh is.
     std::vector<MeshInstance> instances{};
+    /// Skinning influences, one per vertex, or empty for an unskinned mesh.
+    std::vector<SkinningVertex> skinning{};
 
     [[nodiscard]] bool empty() const noexcept {
         return vertices.empty() || indices.empty();
+    }
+
+    /// Whether this mesh carries skinning influences for every vertex.
+    [[nodiscard]] bool skinned() const noexcept {
+        return !skinning.empty() && skinning.size() == vertices.size();
     }
 
     /// The number of placements actually drawn: never zero.

@@ -9,6 +9,14 @@ namespace mgv {
 
 using Mat4 = std::array<float, 16>;
 
+/// The identity, in the column-major layout `Camera` and `Transform` share.
+inline constexpr Mat4 identity_matrix{
+    1.0F, 0.0F, 0.0F, 0.0F,
+    0.0F, 1.0F, 0.0F, 0.0F,
+    0.0F, 0.0F, 1.0F, 0.0F,
+    0.0F, 0.0F, 0.0F, 1.0F,
+};
+
 class Camera final {
 public:
     Camera() = default;

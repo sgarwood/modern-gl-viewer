@@ -15,15 +15,6 @@
 
 namespace mgv {
 
-/// The identity matrix in the column-major layout shared by `Camera` and
-/// `Transform`.
-inline constexpr Mat4 identity_matrix{
-    1.0F, 0.0F, 0.0F, 0.0F,
-    0.0F, 1.0F, 0.0F, 0.0F,
-    0.0F, 0.0F, 1.0F, 0.0F,
-    0.0F, 0.0F, 0.0F, 1.0F,
-};
-
 /// Everything a backend needs that is constant for the whole frame.
 ///
 /// Frontends fill in only the viewport; `Renderer` derives the camera
