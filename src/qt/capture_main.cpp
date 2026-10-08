@@ -109,6 +109,8 @@ int main(int argc, char** argv) {
         "wind", "Wind speed in metres per second.", "mps"};
     const QCommandLineOption ball_option{
         "ball", "Where the ball lies, \"x,0,z\" in the ground plane.", "vec3"};
+    const QCommandLineOption shot_option{
+        "shot", "Fire the deterministic test shot on the first frame."};
     const QCommandLineOption walk_option{
         "walk",
         "Metres to advance the camera towards its target each frame, which "
@@ -135,6 +137,7 @@ int main(int argc, char** argv) {
                                wind_option,
                                ball_option,
                                walk_option,
+                               shot_option,
                                camera_option,
                                target_option,
                                fov_option,
@@ -257,6 +260,9 @@ int main(int argc, char** argv) {
         auto session = mgv::configure_course_session(*engine, description);
         const auto walk = parser.isSet(walk_option) ? parser.value(walk_option).toFloat() : 0.0F;
         auto streamed = 0;
+        if (parser.isSet(shot_option)) {
+            engine->enqueue(mgv::InputAction::fire_test_shot);
+        }
         for (int frame = 0; frame < frames; ++frame) {
             if (walk != 0.0F) {
                 // Step along the ground towards where the camera is looking,
