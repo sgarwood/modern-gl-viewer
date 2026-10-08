@@ -413,6 +413,7 @@ if(BUILD_TESTING)
         tests/camera_test.cpp
         tests/camera_controller_test.cpp
         tests/compass_test.cpp
+        tests/course_session_test.cpp
         tests/engine_test.cpp
         tests/game/round_test.cpp
         tests/golf/shot_model_test.cpp
@@ -448,6 +449,7 @@ if(BUILD_TESTING)
     )
     target_compile_definitions(mgv_tests PRIVATE
         MGV_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+        MGV_TEST_ASSETS="${CMAKE_CURRENT_SOURCE_DIR}/assets"
     )
     if(MSVC)
         target_compile_options(mgv_tests PRIVATE /wd4127)

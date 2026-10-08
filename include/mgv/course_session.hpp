@@ -19,22 +19,18 @@ namespace mgv {
 /// so an absolute eye height that works at the green puts the camera
 /// underground on the fairway.
 ///
-/// The default is an approach view from out on the fairway rather than a
-/// stance on the green: standing on the putting surface fills the frame with
-/// one cut of grass and hides the very distinctions the scene is built to
-/// show.
+/// The default is a third-person view over the player's rear quarter, with
+/// enough of the approach ahead to read the lie and the line to the green.
 struct CourseViewpoint final {
     /// Where the camera stands, in the ground plane.
-    Vec2 position{5.2F, -47.0F};
+    Vec2 position{8.5F, -50.0F};
     /// Eye height above the terrain, in metres. The default stands the camera
-    /// on a rise behind the ball: a golfer's 1.6 m on a downhill lie
-    /// foreshortens the green to nothing, which is true to life and useless
-    /// for seeing the hole.
-    float eye_height{6.4F};
+    /// above and behind the golfer without turning into a bird's-eye view.
+    float eye_height{2.8F};
     /// What the camera looks at, in the ground plane.
-    Vec2 target{1.9F, -2.4F};
+    Vec2 target{4.6F, -44.0F};
     /// Height above the terrain at the target, in metres.
-    float target_height{0.5F};
+    float target_height{0.9F};
     float vertical_field_of_view_degrees{42.0F};
     float near_plane{0.05F};
     float far_plane{4'000.0F};
@@ -80,6 +76,10 @@ struct CourseCharacter final {
     Vec2 position{};
     /// Compass bearing it faces, degrees.
     float facing_degrees{};
+    /// Rotation from the model's authored forward axis to the engine's -Z
+    /// forward axis. For example, Blender's -Y becomes glTF +Z and needs 180
+    /// degrees here.
+    float facing_offset_degrees{};
     /// Uniform scale. Characters are rarely authored in metres.
     float scale{1.0F};
     /// The club they are holding, if any.
@@ -171,6 +171,7 @@ struct CourseSession final {
     /// asset needed standing upright.
     std::optional<EntityId> character{};
     bool character_z_up{};
+    float character_facing_offset_degrees{};
     float character_scale{1.0F};
     /// The club entity and how it is socketed, if the session placed one.
     std::optional<EntityId> club_entity{};

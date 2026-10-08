@@ -169,6 +169,26 @@ slowly. For a swing proper, retarget motion capture -- see the CMU database
 above -- and keep this for the static poses a round needs: addressing,
 crouching at the cup, standing at the range finder.
 
+## The default player
+
+`assets/characters/` holds Quaternius' CC0 `Male_Casual`, which the default
+course session stands by the ball. `tools/prepare_quaternius_character.py`
+rebuilds the GLB from the Blender source: the model carries seven flat
+colour materials, and a skinned character here draws with one, so the
+script bakes those colours into a small palette texture and gives every
+face a constant UV in its slot. `assets/characters/README.md` has the
+commands.
+
+`CourseCharacter::facing_offset_degrees` turns the model's authored forward
+axis to face the engine's. Blender's -Y becomes glTF +Z, so an asset out of
+Blender wants 180 here; without it a character walks the hole backwards.
+It is separate from `facing_degrees` because one is a property of the asset
+and the other is where the player happens to be looking.
+
+The rig is 31 joints named the way Blender names them -- `UpperArm.L`,
+`Palm.R`, `Hips`, `Torso` -- which is easier to author a pose against than
+the model it replaced.
+
 ## Socketing a club
 
 A prop held in a hand reads the same animation the hand does, rather than a

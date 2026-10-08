@@ -479,7 +479,8 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
             wanted.position.x, wanted.position.y, description.terrain);
         constexpr float degrees_to_radians = 3.14159265F / 180.0F;
         const auto facing = Quaternion::from_axis_angle(
-            {0.0F, 1.0F, 0.0F}, wanted.facing_degrees * degrees_to_radians);
+            {0.0F, 1.0F, 0.0F},
+            (wanted.facing_degrees + wanted.facing_offset_degrees) * degrees_to_radians);
         // The import rotation goes on the model matrix rather than into the
         // vertices, because the skinning palette is in the skeleton's own
         // space: rotating the mesh without rotating the palette would just
@@ -631,6 +632,9 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
         .grass_centre = grass_field.centre,
         .character = character_entity,
         .character_z_up = description.character && description.character->z_up,
+        .character_facing_offset_degrees = description.character
+            ? description.character->facing_offset_degrees
+            : 0.0F,
         .character_scale = description.character ? description.character->scale : 1.0F,
         .club_entity = club_index ? std::optional<EntityId>{entities[*club_index]}
                                   : std::nullopt,
@@ -682,7 +686,9 @@ game::RoundEvent advance_round(
     if (session.character) {
         constexpr float degrees_to_radians = 3.14159265F / 180.0F;
         const auto facing = Quaternion::from_axis_angle(
-            {0.0F, 1.0F, 0.0F}, update.player_facing_degrees * degrees_to_radians);
+            {0.0F, 1.0F, 0.0F},
+            (update.player_facing_degrees + session.character_facing_offset_degrees) *
+                degrees_to_radians);
         const auto upright = session.character_z_up
             ? Quaternion::from_axis_angle({1.0F, 0.0F, 0.0F}, -90.0F * degrees_to_radians)
             : Quaternion{};
@@ -842,6 +848,20 @@ CourseSessionDescription default_course_session(const std::filesystem::path& ass
     CourseSessionDescription description;
     description.assets.ball_model = asset_directory / "ball.obj";
     description.assets.shader_directory = asset_directory / "shaders";
+    description.character = CourseCharacter{
+        .model = asset_directory / "characters/quaternius_male_casual.glb",
+        .skeleton = asset_directory / "characters/quaternius_male_casual_skeleton.ozz",
+        .animation = asset_directory / "characters/quaternius_male_casual_idle.ozz",
+        .follow_through = {},
+        // Stand just left of the ball, facing up the hole. The source asset
+        // is 4.84 Blender units tall, so this puts the golfer at 1.79 m.
+        .position = {4.77F, -46.59F},
+        .facing_degrees = -176.3F,
+        .facing_offset_degrees = 180.0F,
+        .scale = 0.37F,
+        .club = {},
+        .z_up = false,
+    };
 
     auto& environment = description.environment;
     environment.sun.direction = sun_direction_from_angles(158.0F, 43.0F);
