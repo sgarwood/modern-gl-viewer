@@ -268,6 +268,21 @@ private:
     RenderBackend& backend_;
 };
 
+class ShadowPassScope final {
+public:
+    ShadowPassScope(RenderBackend& backend, const Frame& frame, std::uint32_t cascade_index)
+        : backend_{backend} {
+        backend_.begin_shadow_pass(frame, cascade_index);
+    }
+    ~ShadowPassScope() { backend_.end_shadow_pass(); }
+
+    ShadowPassScope(const ShadowPassScope&) = delete;
+    ShadowPassScope& operator=(const ShadowPassScope&) = delete;
+
+private:
+    RenderBackend& backend_;
+};
+
 } // namespace
 
 struct Renderer::Impl final {
@@ -550,42 +565,40 @@ void Renderer::render(const Frame& frame) {
     resolved.camera_position = impl_->camera.position();
     resolved.environment = impl_->environment;
 
+    std::vector<ShadowCascade> cascades;
     if (capabilities.directional_shadows) {
-        // Centre the shadow volume ahead of the camera rather than on it, so
-        // the covered region follows where the player is looking instead of
-        // wasting half its area behind them.
-        const auto& eye = impl_->camera.position();
-        const auto& look = impl_->camera.target();
-        const auto ahead_x = look.x - eye.x;
-        const auto ahead_z = look.z - eye.z;
-        const auto ahead_length = std::sqrt(ahead_x * ahead_x + ahead_z * ahead_z);
-        const auto offset = ahead_length > 1.0e-4F
-            ? impl_->shadow_volume.radius * 0.55F / ahead_length
-            : 0.0F;
-
-        auto volume = impl_->shadow_volume;
-        volume.centre = {eye.x + ahead_x * offset, 0.0F, eye.z + ahead_z * offset};
-        volume.resolution = capabilities.shadow_map_resolution;
-        resolved.sun_view_projection = directional_light_view_projection(
-            impl_->environment.sun.direction, volume, capabilities.clip_space);
-    }
-
-    if (capabilities.directional_shadows) {
-        impl_->backend->begin_shadow_pass(resolved);
-        for (const auto& renderable : impl_->renderables) {
-            if (!renderable.visible || !renderable.casts_shadow) {
-                continue;
-            }
-            impl_->backend->draw({
-                .mesh = *renderable.mesh,
-                .pipeline = *renderable.pipeline,
-                .model_view_projection =
-                    multiply(resolved.sun_view_projection, renderable.model_matrix),
-                .model = renderable.model_matrix,
-                .normal_matrix = renderable.normal_matrix,
-            });
+        auto settings = impl_->shadow_volume;
+        settings.resolution = capabilities.shadow_map_resolution;
+        cascades = directional_light_cascades(
+            impl_->camera,
+            safe_aspect,
+            impl_->environment.sun.direction,
+            settings,
+            capabilities.clip_space);
+        resolved.sun_cascade_count = static_cast<std::uint32_t>(cascades.size());
+        for (std::size_t index = 0; index < cascades.size(); ++index) {
+            resolved.sun_view_projections[index] = cascades[index].view_projection;
+            resolved.sun_cascade_splits[index] = cascades[index].split_depth;
         }
-        impl_->backend->end_shadow_pass();
+        resolved.sun_view_projection = cascades.front().view_projection;
+
+        for (std::size_t index = 0; index < cascades.size(); ++index) {
+            const auto cascade_index = static_cast<std::uint32_t>(index);
+            const ShadowPassScope shadow_scope{*impl_->backend, resolved, cascade_index};
+            for (const auto& renderable : impl_->renderables) {
+                if (!renderable.visible || !renderable.casts_shadow) {
+                    continue;
+                }
+                impl_->backend->draw({
+                    .mesh = *renderable.mesh,
+                    .pipeline = *renderable.pipeline,
+                    .model_view_projection = multiply(
+                        cascades[index].view_projection, renderable.model_matrix),
+                    .model = renderable.model_matrix,
+                    .normal_matrix = renderable.normal_matrix,
+                });
+            }
+        }
     }
 
     const FrameScope frame_scope{*impl_->backend, resolved};

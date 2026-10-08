@@ -7,6 +7,7 @@
 #include "mgv/render_pipeline.hpp"
 #include "mgv/texture.hpp"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -39,8 +40,12 @@ struct Frame final {
     Vec3 camera_position{};
     Environment environment{};
     /// The matrix the sun's shadow map was rendered with. Meaningful only
-    /// when the backend reported shadow support.
+    /// when the backend reported shadow support. Retained as the first
+    /// cascade for custom shaders using the original single-map contract.
     Mat4 sun_view_projection{identity_matrix};
+    std::array<Mat4, maximum_shadow_cascades> sun_view_projections{};
+    std::array<float, maximum_shadow_cascades> sun_cascade_splits{};
+    std::uint32_t sun_cascade_count{};
     /// World-space points where the ball has recently rolled, used to dry a
     /// track into wet turf. Owned by the caller for the duration of the frame.
     std::span<const Vec3> wet_trail{};
@@ -155,7 +160,9 @@ public:
     ///
     /// Backends without shadow support inherit a pass that does nothing, and
     /// never have one driven against them.
-    virtual void begin_shadow_pass(const Frame&) {}
+    virtual void begin_shadow_pass(const Frame&, std::uint32_t cascade_index) {
+        static_cast<void>(cascade_index);
+    }
     virtual void end_shadow_pass() noexcept {}
 
 protected:
