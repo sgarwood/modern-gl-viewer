@@ -153,6 +153,15 @@ a bone leaves rotation about its own length undetermined, and for a golf
 finish that rotation is most of the pose: the separation between open hips
 and a more open chest is the whole shape.
 
+`mgv_pose_author <skeleton.ozz>` with no pose lists the joints and their
+rest positions, and a run with a pose prints where that pose actually put
+them. Aiming bones is open loop -- nothing checks that two hands meant to
+share a grip end up in the same place -- so the report is how the author
+closes the loop. For the shipped rig it says: up +Y, the character's own
+left +X, front -Z. The pole targets sit *behind* the knees, so inferring
+the facing from them gets it backwards; the shoulder line under a known
+twist is the reliable test.
+
 Two things that cost time, recorded so they do not again:
 
 - **Directions are in the finished frame, not the rest frame.** The body has
@@ -163,6 +172,18 @@ Two things that cost time, recorded so they do not again:
   just the aim applied on top of it. Leaving it out gives every joint below
   the root the wrong parent frame, and the error compounds down the chain
   into what looks exactly like a slouch.
+
+- **The twist sign is not what the right-hand rule suggests.** On this rig
+  a *negative* twist about the spine turns the golfer towards a target at
+  +X. Reasoning it out produced the opposite every time; rendering two
+  poses with the sign flipped settled it in one go, and is the cheaper
+  move.
+- **Check the proportions before choosing a shape.** This character's arms
+  reach 1.56 against a shoulder height of 3.76, so a hand anywhere near the
+  head sits very close to its own shoulder and the elbow has to splay. The
+  textbook finish -- both hands together above the lead shoulder -- is
+  simply out of reach for the trail arm here, which is a fact about the
+  asset and not something tuning will fix.
 
 Hand-authoring reaches a recognisable posture quickly and a convincing one
 slowly. For a swing proper, retarget motion capture -- see the CMU database

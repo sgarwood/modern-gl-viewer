@@ -49,19 +49,19 @@ struct CourseClub final {
     std::filesystem::path model;
     /// The joint it is gripped by, by name. The lead hand, for a club: the
     /// trail hand follows it rather than the other way round.
-    std::string grip_joint{"Skeleton_arm_joint_L__2_"};
+    std::string grip_joint{"Palm.L"};
     /// Metres per model unit.
-    float scale{0.16F};
+    float scale{0.42F};
     /// Which point of the club lands in the hand, in the club's own units
     /// and applied before it is turned and scaled, and how it is then
     /// turned to lie in the grip. Authored against the asset, since no two
     /// exporters agree on which way a club points.
-    /// Defaults authored against assets/golf_club.stl, whose shaft runs
-    /// along +Z with the head at -Z and whose origin sits mid-shaft: put
-    /// z = 3 in the hand and lay the club back over the trail shoulder,
-    /// which is where a finish leaves it.
+    /// Defaults authored against assets/golf_club.stl held in the shipped
+    /// character's Palm.L. The club's shaft runs along +Z with the head at
+    /// -Z and its origin sits mid-shaft, so z = 3 is the butt of the grip
+    /// and belongs in the hand.
     Vec3 grip_offset{0.0F, 0.0F, -3.0F};
-    Vec3 grip_rotation_degrees{-175.0F, 0.0F, 0.0F};
+    Vec3 grip_rotation_degrees{-90.0F, 0.0F, 0.0F};
 };
 
 struct CourseCharacter final {

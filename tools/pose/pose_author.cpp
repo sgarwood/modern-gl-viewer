@@ -38,6 +38,7 @@ Vec3 normalize(Vec3 v) {
     return n > 1e-6F ? Vec3{v.x/n, v.y/n, v.z/n} : Vec3{0,0,1};
 }
 Vec3 cross(Vec3 a, Vec3 b) { return {a.y*b.z-a.z*b.y, a.z*b.x-a.x*b.z, a.x*b.y-a.y*b.x}; }
+Vec3 add(Vec3 a, Vec3 b) { return {a.x+b.x, a.y+b.y, a.z+b.z}; }
 float dot(Vec3 a, Vec3 b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
 Quat multiply(Quat a, Quat b) {
     return {a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
@@ -93,9 +94,17 @@ struct Aim {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 4) {
-        std::fprintf(stderr, "usage: pose_author <skeleton.ozz> <pose.json> <out.ozz>\n");
-        return 2;
+    if (argc < 3) {
+        // Authoring a pose for an unfamiliar rig starts with finding out
+        // what the joints are called and which way the thing is lying, so
+        // the tool answers that on its own.
+        std::fprintf(
+            stderr,
+            "usage: pose_author <skeleton.ozz> [<pose.json> <out.ozz>]\n"
+            "  with only a skeleton, lists its joints and their rest positions\n");
+        if (argc != 2) {
+            return 2;
+        }
     }
     ozz::io::File in(argv[1], "rb");
     ozz::io::IArchive archive(&in);
@@ -104,6 +113,45 @@ int main(int argc, char** argv) {
     const auto count = skeleton.num_joints();
 
     // ---- the follow-through -------------------------------------------------
+    // Rest model transforms, for the bone directions to aim from.
+    std::vector<ozz::math::Float4x4> rest(count);
+    {
+        ozz::animation::LocalToModelJob job;
+        job.skeleton = &skeleton;
+        job.input = skeleton.joint_rest_poses();
+        job.output = ozz::span<ozz::math::Float4x4>(rest.data(), rest.size());
+        job.Run();
+    }
+    const auto position_of = [&](int joint) {
+        alignas(16) float c[4];
+        ozz::math::StorePtrU(rest[joint].cols[3], c);
+        return Vec3{c[0], c[1], c[2]};
+    };
+    const auto index_of = [&](const char* name) {
+        for (int j = 0; j < count; ++j) {
+            if (std::strcmp(skeleton.joint_names()[j], name) == 0) { return j; }
+        }
+        std::fprintf(stderr, "no joint named %s\n", name);
+        return -1;
+    };
+
+    if (argc == 2) {
+        std::printf("%d joints\n", count);
+        for (int j = 0; j < count; ++j) {
+            const auto at = position_of(j);
+            const auto parent = skeleton.joint_parents()[j];
+            std::printf(
+                "%2d  %-16s parent=%-16s (%7.3f, %7.3f, %7.3f)\n",
+                j,
+                skeleton.joint_names()[j],
+                parent < 0 ? "-" : skeleton.joint_names()[parent],
+                static_cast<double>(at.x),
+                static_cast<double>(at.y),
+                static_cast<double>(at.z));
+        }
+        return 0;
+    }
+
     Json description;
     {
         std::ifstream input{argv[2]};
@@ -135,27 +183,6 @@ int main(int argc, char** argv) {
         });
     }
 
-    // Rest model transforms, for the bone directions to aim from.
-    std::vector<ozz::math::Float4x4> rest(count);
-    {
-        ozz::animation::LocalToModelJob job;
-        job.skeleton = &skeleton;
-        job.input = skeleton.joint_rest_poses();
-        job.output = ozz::span<ozz::math::Float4x4>(rest.data(), rest.size());
-        job.Run();
-    }
-    const auto position_of = [&](int joint) {
-        alignas(16) float c[4];
-        ozz::math::StorePtrU(rest[joint].cols[3], c);
-        return Vec3{c[0], c[1], c[2]};
-    };
-    const auto index_of = [&](const char* name) {
-        for (int j = 0; j < count; ++j) {
-            if (std::strcmp(skeleton.joint_names()[j], name) == 0) { return j; }
-        }
-        std::fprintf(stderr, "no joint named %s\n", name);
-        return -1;
-    };
 
     // Walk the hierarchy, resolving each aim against the model rotation its
     // parent has already accumulated.
@@ -204,6 +231,33 @@ int main(int argc, char** argv) {
         }
         composed[j] = multiply(aimed, rest_rotation_of(j));
         model[j] = multiply(parent_model, composed[j]);
+    }
+
+    // Where the pose actually put everything. Authoring by aiming bones is
+    // open-loop -- nothing checks that two hands meant to share a grip end
+    // up in the same place -- so the tool reports the result and lets the
+    // author close the loop.
+    std::vector<Vec3> posed(count);
+    for (int j = 0; j < count; ++j) {
+        const int soa = j / 4, lane = j % 4;
+        const auto& r = skeleton.joint_rest_poses()[soa];
+        alignas(16) float tx[4], ty[4], tz[4];
+        ozz::math::StorePtr(r.translation.x, tx);
+        ozz::math::StorePtr(r.translation.y, ty);
+        ozz::math::StorePtr(r.translation.z, tz);
+        const Vec3 offset{tx[lane], ty[lane], tz[lane]};
+        const auto parent = parents[j];
+        posed[j] = parent < 0
+            ? offset
+            : add(posed[parent], rotate(model[parent], offset));
+    }
+    for (int j = 0; j < count; ++j) {
+        std::printf(
+            "    %-16s (%7.3f, %7.3f, %7.3f)\n",
+            skeleton.joint_names()[j],
+            static_cast<double>(posed[j].x),
+            static_cast<double>(posed[j].y),
+            static_cast<double>(posed[j].z));
     }
 
     // One key, at time zero. Translations and scales stay at rest: a pose

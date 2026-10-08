@@ -852,14 +852,14 @@ CourseSessionDescription default_course_session(const std::filesystem::path& ass
         .model = asset_directory / "characters/quaternius_male_casual.glb",
         .skeleton = asset_directory / "characters/quaternius_male_casual_skeleton.ozz",
         .animation = asset_directory / "characters/quaternius_male_casual_idle.ozz",
-        .follow_through = {},
+        .follow_through = asset_directory / "characters/quaternius_male_casual_finish.ozz",
         // Stand just left of the ball, facing up the hole. The source asset
         // is 4.84 Blender units tall, so this puts the golfer at 1.79 m.
         .position = {4.77F, -46.59F},
         .facing_degrees = -176.3F,
         .facing_offset_degrees = 180.0F,
         .scale = 0.37F,
-        .club = {},
+        .club = CourseClub{.model = asset_directory / "golf_club.stl"},
         .z_up = false,
     };
 
