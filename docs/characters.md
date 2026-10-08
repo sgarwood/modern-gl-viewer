@@ -185,6 +185,36 @@ Two things that cost time, recorded so they do not again:
   simply out of reach for the trail arm here, which is a fact about the
   asset and not something tuning will fix.
 
+### Retargeting a capture instead
+
+`tools/retarget/retarget_bvh.py` runs under Blender and puts a BVH capture
+onto this character; the shipped follow-through is CMU subject 64's golf
+swing rather than anything authored here. The two skeletons agree on
+nothing but anatomy, so it copies how far each bone has turned *from its
+own rest* and applies that to the target's rest, in world space:
+
+    delta       = source_pose * source_rest^-1
+    destination = delta * destination_rest
+
+Four things it has to get right, each of which broke it first:
+
+- **Orientations only, never whole matrices.** An imported armature
+  usually carries a scale on its object; feed that through the pose
+  matrices and every bone it touches stretches.
+- **The capture skeleton must not reach the exported file.** CMU names
+  `Hips`, `Neck` and `Head` exactly as this rig does, and a runtime that
+  binds a skin to a skeleton by name then picks whichever the importer saw
+  last -- which drags the head off into the sky while leaving everything
+  else correct, so it does not look like a naming problem at all.
+- **Keys are rebased to frame one.** Written at their source frame numbers,
+  a trimmed clip keeps its whole lead-in as dead air and the game plays
+  that instead of the motion.
+- **Plant the feet, not the hips.** The subject has different proportions
+  and stood on a different floor. Pinning the pelvis leaves the feet
+  hovering through the finish, when the legs are straightest; dropping the
+  root until the lower foot is back at its rest height survives the change
+  of proportions.
+
 Hand-authoring reaches a recognisable posture quickly and a convincing one
 slowly. For a swing proper, retarget motion capture -- see the CMU database
 above -- and keep this for the static poses a round needs: addressing,
