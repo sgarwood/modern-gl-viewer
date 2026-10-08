@@ -61,6 +61,9 @@ The patterns this codebase is built from, judged against the ones the field has
 settled on, and what is worth changing, are in
 [`docs/architecture.md`](docs/architecture.md).
 
+Where to source a golfer and a club, and what the animation runtime still needs
+before one can be put on screen, are in [`docs/characters.md`](docs/characters.md).
+
 The round's state machine, its ports, and why it does not live in the engine are
 documented in [`docs/round.md`](docs/round.md).
 

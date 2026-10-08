@@ -14,6 +14,7 @@ option(MGV_GLFW_X11 "Build GLFW's X11 platform on Linux" ON)
 option(MGV_GLFW_WAYLAND "Build GLFW's Wayland platform on Linux" OFF)
 option(MGV_WARNINGS_AS_ERRORS "Treat project warnings as errors" OFF)
 option(MGV_BUILD_CAPTURE_TOOL "Build the offscreen PNG capture tool" OFF)
+option(MGV_BUILD_ANIMATION_TOOLS "Build Ozz's glTF importer, for converting rigged assets" OFF)
 
 add_library(mgv_project_warnings INTERFACE)
 add_library(mgv::project_warnings ALIAS mgv_project_warnings)
@@ -39,9 +40,14 @@ FetchContent_MakeAvailable(stb)
 
 # Ozz remains an implementation detail of mgv::animation. Runtime applications
 # do not need its import tools, samples, or test dependencies.
-set(ozz_build_tools OFF CACHE BOOL "" FORCE)
+# Ozz's importers are an offline step, so they are off by default: a runtime
+# build has no use for them. Turning MGV_BUILD_ANIMATION_TOOLS on produces
+# gltf2ozz, which converts a rigged glTF into the skeleton and animation
+# archives the runtime loads. The Fbx importer stays off regardless; it needs
+# Autodesk's SDK, which cannot be fetched.
+set(ozz_build_tools ${MGV_BUILD_ANIMATION_TOOLS} CACHE BOOL "" FORCE)
 set(ozz_build_fbx OFF CACHE BOOL "" FORCE)
-set(ozz_build_gltf OFF CACHE BOOL "" FORCE)
+set(ozz_build_gltf ${MGV_BUILD_ANIMATION_TOOLS} CACHE BOOL "" FORCE)
 set(ozz_build_data OFF CACHE BOOL "" FORCE)
 set(ozz_build_samples OFF CACHE BOOL "" FORCE)
 set(ozz_build_howtos OFF CACHE BOOL "" FORCE)
