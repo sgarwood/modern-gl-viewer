@@ -189,9 +189,12 @@ Two limits worth knowing:
   the frame time, but a full blade-field rebuild is around a tenth of a second
   and that would be the frame budget on real hardware. It belongs on a worker
   thread, or split across frames, before anything ships.
-- The collision heightmap does **not** stream. It covers a fixed corridor of
-  play; a ball driven outside it falls to the backstop. Walking the whole
-  course needs that to follow the player too.
+- The collidable patch streams too, but follows the **ball** rather than the
+  camera: the ball is the only thing in the world that touches the ground,
+  and in flight it can be two hundred metres from the player. It is snapped
+  for the same reason the terrain's grid is -- an unsnapped patch resamples
+  the ground at a slightly different offset every rebuild, and a putt
+  crossing a rebuild would feel the surface step under it.
 
 ## Filtering
 

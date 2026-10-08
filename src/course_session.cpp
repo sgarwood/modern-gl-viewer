@@ -171,6 +171,52 @@ struct TreePlacement final {
     return piles;
 }
 
+/// The snapped bottom-left corner of the collidable patch, which is where a
+/// heightmap collider's body sits.
+[[nodiscard]] Vec2 snapped_collision_centre(
+    const CourseCollisionDescription& collision,
+    Vec2 around) {
+    // Snapped for the same reason the terrain's grid is: an unsnapped patch
+    // resamples the ground at a slightly different offset every rebuild, and
+    // a putt crossing a rebuild would feel the surface step under it.
+    const auto step = std::max(collision.resolution, 1.0e-3F) * 4.0F;
+    return {std::floor(around.x / step) * step, std::floor(around.y / step) * step};
+}
+
+[[nodiscard]] physics::Position collision_origin(
+    const CourseCollisionDescription& collision,
+    Vec2 around) {
+    const auto centre = snapped_collision_centre(collision, around);
+    return physics::Position{
+        {centre.x - collision.half_extent, 0.0F, centre.y - collision.half_extent}};
+}
+
+/// Samples the terrain into a heightmap collider centred on `around`.
+[[nodiscard]] physics::Collider collision_patch(
+    const CourseCollisionDescription& collision,
+    const CourseTerrainDescription& terrain,
+    Vec2 around) {
+    const auto spacing = std::max(collision.resolution, 0.01F);
+    const auto samples =
+        static_cast<int>(std::ceil(2.0F * collision.half_extent / spacing)) + 1;
+    if (samples < 2) {
+        throw std::invalid_argument{"Course collision patch is smaller than one sample"};
+    }
+    const auto origin = collision_origin(collision, around);
+    const auto corner = origin.metres();
+
+    std::vector<float> heights;
+    heights.reserve(static_cast<std::size_t>(samples) * static_cast<std::size_t>(samples));
+    for (int row = 0; row < samples; ++row) {
+        const auto z = corner.z + static_cast<float>(row) * spacing;
+        for (int column = 0; column < samples; ++column) {
+            const auto x = corner.x + static_cast<float>(column) * spacing;
+            heights.push_back(course_terrain_height(x, z, terrain));
+        }
+    }
+    return physics::Collider::heightmap(samples, samples, spacing, spacing, std::move(heights));
+}
+
 /// Merges every primitive of an imported model into one mesh.
 ///
 /// The course meshes are single-material surfaces, and collapsing them keeps
@@ -399,49 +445,30 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
             .restitution(0.78F)
             .build()));
 
-    // The ball has to roll on the same surface that is drawn, so the collider
-    // is sampled from the very function the terrain mesh is built from.
-    const auto& collision = description.collision;
-    const auto spacing = std::max(collision.resolution, 0.01F);
-    const auto columns = static_cast<int>(
-        std::ceil((collision.maximum.x - collision.minimum.x) / spacing)) + 1;
-    const auto rows = static_cast<int>(
-        std::ceil((collision.maximum.y - collision.minimum.y) / spacing)) + 1;
-    if (columns < 2 || rows < 2) {
-        throw std::invalid_argument{"Course collision region is smaller than one sample"};
-    }
+    // The ball has to roll on the same surface that is drawn, so the
+    // collider is sampled from the very function the terrain mesh is built
+    // from. It follows the ball; see stream_course.
+    const auto ground = engine.add_static_collider(
+        physics::RigidBodyBuilder{
+            collision_patch(description.collision, description.terrain, description.ball_start)}
+            .motion(physics::MotionType::static_body)
+            .at(collision_origin(description.collision, description.ball_start))
+            .build());
 
-    std::vector<float> heights;
-    heights.reserve(static_cast<std::size_t>(columns) * static_cast<std::size_t>(rows));
-    for (int row = 0; row < rows; ++row) {
-        const auto z = collision.minimum.y + static_cast<float>(row) * spacing;
-        for (int column = 0; column < columns; ++column) {
-            const auto x = collision.minimum.x + static_cast<float>(column) * spacing;
-            heights.push_back(course_terrain_height(x, z, description.terrain));
-        }
-    }
-
+    // A backstop far below, so a ball driven clear of the patch comes to
+    // rest instead of falling forever.
     static_cast<void>(engine.add_static_collider(
         physics::RigidBodyBuilder{
-            physics::Collider::heightmap(columns, rows, spacing, spacing, std::move(heights))}
+            physics::Collider::box(physics::Dimensions{{4'000.0F, 0.5F, 4'000.0F}})}
             .motion(physics::MotionType::static_body)
-            .at(physics::Position{{collision.minimum.x, 0.0F, collision.minimum.y}})
+            .at(physics::Position{{0.0F, description.collision.backstop_height - 0.5F, 0.0F}})
             .build()));
 
-    // A backstop far below, so a ball driven off the heightmap comes to rest
-    // instead of falling forever.
-    static_cast<void>(engine.add_static_collider(
-        physics::RigidBodyBuilder{
-            physics::Collider::box(physics::Dimensions{{2'000.0F, 0.5F, 2'000.0F}})}
-            .motion(physics::MotionType::static_body)
-            .at(physics::Position{{0.0F, collision.backstop_height - 0.5F, 0.0F}})
-            .build()));
-
-    const auto on_terrain = [&description](Vec2 ground, float height) {
+    const auto on_terrain = [&description](Vec2 place, float height) {
         return Vec3{
-            ground.x,
-            course_terrain_height(ground.x, ground.y, description.terrain) + height,
-            ground.y,
+            place.x,
+            course_terrain_height(place.x, place.y, description.terrain) + height,
+            place.y,
         };
     };
 
@@ -459,6 +486,8 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
     return {
         .ball = ball,
         .terrain = entities[terrain_index],
+        .ground = ground,
+        .collision_centre = snapped_collision_centre(description.collision, description.ball_start),
         .grass = grass_index ? std::optional<EntityId>{entities[*grass_index]} : std::nullopt,
         .terrain_centre = snapped_terrain_centre(tessellation),
         .grass_centre = grass_field.centre,
@@ -480,6 +509,27 @@ bool stream_course(
         if (engine.update_mesh(
                 session.terrain, make_course_terrain(description.terrain, tessellation))) {
             session.terrain_centre = wanted;
+            rebuilt = true;
+        }
+    }
+
+    // The collidable patch follows the ball, not the camera: the ball is the
+    // only thing in the world that touches the ground, and in flight it can
+    // be two hundred metres from the player.
+    const auto lie = engine.transform(session.ball).position();
+    const Vec2 ball_ground{lie.x, lie.z};
+    const auto strayed_x = ball_ground.x - session.collision_centre.x;
+    const auto strayed_z = ball_ground.y - session.collision_centre.y;
+    const auto allowed =
+        description.collision.half_extent * std::clamp(description.collision.rebuild_fraction, 0.05F, 0.9F);
+    if (strayed_x * strayed_x + strayed_z * strayed_z > allowed * allowed) {
+        const auto wanted_centre = snapped_collision_centre(description.collision, ball_ground);
+        if (wanted_centre != session.collision_centre) {
+            engine.set_static_collider(
+                session.ground,
+                collision_patch(description.collision, description.terrain, ball_ground),
+                collision_origin(description.collision, ball_ground));
+            session.collision_centre = wanted_centre;
             rebuilt = true;
         }
     }

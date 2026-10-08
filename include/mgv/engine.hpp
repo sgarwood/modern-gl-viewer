@@ -151,6 +151,12 @@ public:
         physics::RigidBodyDefinition body);
     [[nodiscard]] physics::BodyId add_static_collider(
         physics::RigidBodyDefinition body);
+    /// Replaces a static collider's shape and position, so a collidable
+    /// patch can follow the action rather than cover the world.
+    void set_static_collider(
+        physics::BodyId body,
+        physics::Collider collider,
+        physics::Position position);
     [[nodiscard]] animation::AnimationClipId load_animation(
         const animation::AnimationAssetPaths& assets);
     [[nodiscard]] animation::AnimationPlayerId bind_animation(

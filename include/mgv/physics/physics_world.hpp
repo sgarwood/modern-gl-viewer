@@ -59,6 +59,17 @@ public:
     [[nodiscard]] std::optional<RaycastHit> raycast(Position origin, Vec3 direction) const;
     void apply_impulse(BodyId id, Impulse impulse);
     void set_velocity(BodyId id, LinearVelocity linear, AngularVelocity angular);
+    /// Moves a body outright, without giving it the velocity the move
+    /// implies. For teleporting rather than for simulating.
+    void set_position(BodyId id, Position position);
+    /// Replaces a static body's collider and places it.
+    ///
+    /// The world a ball can land on is far larger than any heightmap fine
+    /// enough to putt on, so the collidable patch follows the ball rather
+    /// than covering the course. Restricted to static bodies: swapping the
+    /// shape under something with momentum has no defensible answer for what
+    /// its velocity should become.
+    void set_static_collider(BodyId id, Collider collider, Position position);
     void simulate(Duration elapsed_time);
 
 private:

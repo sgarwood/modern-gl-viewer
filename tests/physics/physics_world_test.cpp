@@ -256,3 +256,89 @@ TEST_CASE("a ball left on a slope does not accelerate without bound") {
     CHECK(speed < 4.0F);
     CHECK(travelled < 12.0F);
 }
+
+namespace {
+
+/// A heightmap of constant height, as a patch that can be placed anywhere.
+[[nodiscard]] mgv::physics::Collider flat_patch(int samples, float spacing, float height) {
+    return mgv::physics::Collider::heightmap(
+        samples, samples, spacing, spacing,
+        std::vector<float>(static_cast<std::size_t>(samples * samples), height));
+}
+
+} // namespace
+
+TEST_CASE("a static collider can be replaced so the ground follows the ball") {
+    mgv::physics::PhysicsConfiguration configuration;
+    configuration.fixed_time_step = mgv::physics::Duration{1.0F / 120.0F};
+    mgv::physics::PhysicsWorld world{configuration};
+
+    constexpr float radius = 0.021335F;
+    constexpr int samples = 21;
+    constexpr float spacing = 1.0F;
+
+    const auto ball = world.add_body(
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::sphere(mgv::physics::Length{radius})}
+            .at(mgv::physics::Position{{0.0F, radius, 0.0F}})
+            .mass(mgv::physics::Mass{0.04593F})
+            .restitution(0.0F)
+            .build());
+    // A twenty metre patch centred on the origin.
+    const auto ground = world.add_body(
+        mgv::physics::RigidBodyBuilder{flat_patch(samples, spacing, 0.0F)}
+            .motion(mgv::physics::MotionType::static_body)
+            .at(mgv::physics::Position{{-10.0F, 0.0F, -10.0F}})
+            .build());
+
+    // Long enough for a ball to fall a few metres and come to rest.
+    const auto settle = [&world] {
+        for (int step = 0; step < 360; ++step) {
+            world.simulate(mgv::physics::Duration{1.0F / 120.0F});
+        }
+    };
+    settle();
+    CHECK(world.body(ball).position().metres().y == Catch::Approx(radius).margin(0.005F));
+
+    SECTION("a ball beyond the patch has nothing to rest on") {
+        world.set_position(ball, mgv::physics::Position{{400.0F, radius, 0.0F}});
+        settle();
+        CHECK(world.body(ball).position().metres().y < 0.0F);
+    }
+
+    SECTION("moving the patch under it gives it ground again") {
+        world.set_position(ball, mgv::physics::Position{{400.0F, radius, 0.0F}});
+        world.set_static_collider(
+            ground,
+            flat_patch(samples, spacing, 0.0F),
+            mgv::physics::Position{{390.0F, 0.0F, -10.0F}});
+        settle();
+        CHECK(world.body(ball).position().metres().y == Catch::Approx(radius).margin(0.005F));
+    }
+
+    SECTION("the replacement carries its own heights") {
+        world.set_static_collider(
+            ground,
+            flat_patch(samples, spacing, 5.0F),
+            mgv::physics::Position{{-10.0F, 0.0F, -10.0F}});
+        world.set_position(ball, mgv::physics::Position{{0.0F, 8.0F, 0.0F}});
+        settle();
+        CHECK(world.body(ball).position().metres().y == Catch::Approx(5.0F + radius).margin(0.01F));
+    }
+}
+
+TEST_CASE("only a static body's collider may be replaced") {
+    mgv::physics::PhysicsWorld world;
+    const auto ball = world.add_body(
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::sphere(mgv::physics::Length{0.5F})}
+            .build());
+
+    CHECK_THROWS_AS(
+        world.set_static_collider(ball, flat_patch(4, 1.0F, 0.0F), mgv::physics::Position{}),
+        std::logic_error);
+    CHECK_THROWS_AS(
+        world.set_static_collider(
+            mgv::physics::BodyId{9999}, flat_patch(4, 1.0F, 0.0F), mgv::physics::Position{}),
+        std::out_of_range);
+}

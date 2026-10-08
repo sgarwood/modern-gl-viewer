@@ -48,20 +48,27 @@ struct CourseAssets final {
     std::filesystem::path shader_directory;
 };
 
-/// The region of the course the ball can actually collide with.
+/// The patch of ground the ball can actually collide with.
 ///
-/// The drawn terrain runs to the horizon, but a heightmap fine enough to putt
-/// on cannot cover that much ground. The collider covers the corridor of
-/// play; anything hit far outside it lands on a backstop well below.
+/// The drawn terrain runs to the horizon, but a heightmap fine enough to
+/// putt on cannot cover that much ground: at the resolution a green needs,
+/// the whole course would be millions of samples. The patch therefore
+/// follows the ball, which is the only thing in the world that collides
+/// with the ground.
 struct CourseCollisionDescription final {
-    Vec2 minimum{-70.0F, -230.0F};
-    Vec2 maximum{70.0F, 40.0F};
+    /// Half-width of the patch, in metres. It only has to outrun the ball
+    /// between rebuilds, and the physics clamps how far that can be in one
+    /// tick, so this is generous.
+    float half_extent{45.0F};
     /// Spacing between samples, in metres. The green's undulation has a
     /// wavelength of about sixteen metres, so this resolves it to well under
     /// a millimetre after interpolation.
-    float resolution{0.25F};
-    /// Height of the backstop that catches anything leaving the heightmap.
-    float backstop_height{-12.0F};
+    float resolution{0.4F};
+    /// How far the ball may stray from the patch's centre before it is
+    /// rebuilt, as a fraction of the half-extent.
+    float rebuild_fraction{0.3F};
+    /// Height of the backstop that catches anything leaving the patch.
+    float backstop_height{-40.0F};
 };
 
 struct CourseSessionDescription final {
@@ -88,6 +95,10 @@ struct CourseSessionDescription final {
 struct CourseSession final {
     EntityId ball{};
     EntityId terrain{};
+    /// The streamed patch of collidable ground.
+    physics::BodyId ground{};
+    /// Where that patch is currently centred.
+    Vec2 collision_centre{};
     /// Absent when the session was built with no blade field.
     std::optional<EntityId> grass{};
     /// Where the terrain's detail is currently centred, already snapped.

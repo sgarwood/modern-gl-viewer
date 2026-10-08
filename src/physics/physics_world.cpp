@@ -86,6 +86,19 @@ public:
         body.angular_velocity_ = angular;
     }
 
+    void set_position(BodyId id, Position position) {
+        find_mutable(id).position_ = position;
+    }
+
+    void set_static_collider(BodyId id, Collider collider, Position position) {
+        auto& body = find_mutable(id);
+        if (body.motion_ != MotionType::static_body) {
+            throw std::logic_error{"Only a static body's collider may be replaced"};
+        }
+        body.collider_ = std::move(collider);
+        body.position_ = position;
+    }
+
     
     [[nodiscard]] std::optional<RaycastHit> raycast(Position origin, Vec3 direction) const {
         std::optional<RaycastHit> closest_hit;
@@ -503,6 +516,14 @@ std::span<const Collision> PhysicsWorld::collisions() const noexcept {
 
 void PhysicsWorld::set_velocity(BodyId id, LinearVelocity linear, AngularVelocity angular) {
     impl_->set_velocity(id, linear, angular);
+}
+
+void PhysicsWorld::set_position(BodyId id, Position position) {
+    impl_->set_position(id, position);
+}
+
+void PhysicsWorld::set_static_collider(BodyId id, Collider collider, Position position) {
+    impl_->set_static_collider(id, std::move(collider), position);
 }
 
 

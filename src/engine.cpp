@@ -450,6 +450,13 @@ physics::BodyId Engine::bind_golf_ball(
     return id;
 }
 
+void Engine::set_static_collider(
+    physics::BodyId body,
+    physics::Collider collider,
+    physics::Position position) {
+    impl_->physics_world.set_static_collider(body, std::move(collider), position);
+}
+
 physics::BodyId Engine::add_static_collider(physics::RigidBodyDefinition body) {
     if (body.motion() != physics::MotionType::static_body) {
         throw std::invalid_argument{"World collider must be static"};
