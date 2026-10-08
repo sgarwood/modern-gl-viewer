@@ -57,6 +57,10 @@ documented in [`docs/rendering.md`](docs/rendering.md).
 
 Where the project is and what is next is kept in [`docs/roadmap.md`](docs/roadmap.md).
 
+The patterns this codebase is built from, judged against the ones the field has
+settled on, and what is worth changing, are in
+[`docs/architecture.md`](docs/architecture.md).
+
 The round's state machine, its ports, and why it does not live in the engine are
 documented in [`docs/round.md`](docs/round.md).
 
