@@ -312,12 +312,12 @@ void finish_normals(MeshBuilder& builder) {
             if (name.empty()) {
                 fail(path.string(), line_number, "newmtl requires a material name");
             }
-            materials.push_back({
-                .name = std::move(name),
-                .diffuse_color = {1.0F, 1.0F, 1.0F},
-                .opacity = 1.0F,
-                .diffuse_texture = std::nullopt,
-            });
+            // Built field by field: naming members in a designated
+            // initialiser and leaving the rest out trips -Wmissing-field-
+            // initializers every time the struct gains one.
+            ImportedMaterial material;
+            material.name = std::move(name);
+            materials.push_back(std::move(material));
             continue;
         }
         if (materials.empty()) {

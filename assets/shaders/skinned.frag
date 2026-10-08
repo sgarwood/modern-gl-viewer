@@ -12,6 +12,7 @@ in vec2 vTexCoord;
 out vec4 fragColor;
 
 uniform vec4 uBaseColorFactor;
+uniform sampler2D uBaseColorTexture;
 
 void main() {
     vec3 normal = normalize(vWorldNormal);
@@ -24,7 +25,10 @@ void main() {
     surface.position = vWorldPosition;
     surface.normal = normal;
     surface.view = view;
-    surface.albedo = uBaseColorFactor.rgb;
+    // The texture is decoded as sRGB, so this is already linear. The factor
+    // multiplies it, as glTF specifies; a model with no texture binds a
+    // white pixel and gets the factor alone.
+    surface.albedo = uBaseColorFactor.rgb * texture(uBaseColorTexture, vTexCoord).rgb;
     surface.roughness = clamp(uBaseColorFactor.a, 0.04, 1.0);
     surface.metallic = 0.0;
     surface.occlusion = 1.0;

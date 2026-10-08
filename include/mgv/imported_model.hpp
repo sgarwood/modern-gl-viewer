@@ -2,6 +2,7 @@
 
 #include "mgv/camera.hpp"
 #include "mgv/mesh.hpp"
+#include "mgv/texture.hpp"
 
 #include <cstddef>
 #include <filesystem>
@@ -15,7 +16,14 @@ struct ImportedMaterial final {
     std::string name;
     Vec3 diffuse_color{1.0F, 1.0F, 1.0F};
     float opacity{1.0F};
+    /// Set when the texture is a file beside the model, as Wavefront's
+    /// `map_Kd` always is.
     std::optional<std::filesystem::path> diffuse_texture;
+    /// Set when the texture travelled inside the model, as it does in every
+    /// glTF binary. A format that carries its own images has no path to give.
+    std::optional<ImageData> diffuse_image;
+    /// How that texture should be sampled, as the model asked.
+    SamplerDescriptor sampler;
 };
 
 struct ImportedPrimitive final {

@@ -218,6 +218,14 @@ struct TreePlacement final {
     return physics::Collider::heightmap(samples, samples, spacing, spacing, std::move(heights));
 }
 
+/// A single white pixel, for shaders that sample a base colour texture on a
+/// model that did not bring one.
+[[nodiscard]] std::shared_ptr<const Texture> white_texture() {
+    static const auto texture = std::make_shared<const Texture>(ImageData{
+        1, 1, PixelFormat::rgba8_unorm, ColorSpace::srgb, {255, 255, 255, 255}});
+    return texture;
+}
+
 /// The generated course, presented to the round as ground it can walk on.
 class CourseGround final : public game::GroundHeights {
 public:
@@ -487,6 +495,16 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
             ? Vec3{0.62F, 0.60F, 0.58F}
             : imported.materials.front().diffuse_color;
         instance.set_color("uBaseColorFactor", {albedo.x, albedo.y, albedo.z, 0.65F});
+        // A shader that samples a texture needs one bound whether the model
+        // brought one or not; an unbound sampler reads as black, which turns
+        // an untextured character into a silhouette.
+        instance.set_texture(
+            "uBaseColorTexture",
+            !imported.materials.empty() && imported.materials.front().diffuse_image
+                ? std::make_shared<const Texture>(
+                      *imported.materials.front().diffuse_image,
+                      imported.materials.front().sampler)
+                : white_texture());
 
         character_index = scene.size();
         character_skin = imported.skin;

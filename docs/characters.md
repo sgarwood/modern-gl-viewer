@@ -87,10 +87,18 @@ individually.
 
 ## What is missing in this codebase
 
-**Items 1, 2, 3 and 4 below are now done.** A rigged glTF loads, its
-influences reach the vertex stage, the palette is published, and
-`skinned.vert` blends it. What remains of this list is the record of what it
-took.
+**Items 1, 2, 3 and 4 below are now done**, and so are textures. A rigged
+glTF loads with its images, its influences reach the vertex stage, the
+palette is published, and `skinned.vert` blends it and samples the base
+colour. What remains of this list is the record of what it took.
+
+Textures travel inside a `.glb` as buffer views, so there is no path to hand
+a file-based decoder; `ImageLoader::decode` takes bytes. They are decoded as
+**sRGB**, because base colour is authored for display -- decoding it as
+linear is the classic way a textured character comes out washed out. The
+model's sampler is honoured rather than defaulted, and a model that brought
+no texture is given a white pixel, because an unbound sampler reads as black
+and would turn it into a silhouette.
 
 In the order they had to happen.
 

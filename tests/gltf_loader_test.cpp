@@ -105,3 +105,41 @@ TEST_CASE("a missing glTF is reported by name") {
         mgv::GltfLoader{}.load(fixture("absent.gltf")),
         Catch::Matchers::ContainsSubstring("absent.gltf"));
 }
+
+TEST_CASE("a texture carried inside the model is decoded") {
+    const auto model = mgv::GltfLoader{}.load(fixture("banner.gltf"));
+
+    REQUIRE(model.materials.size() == 1);
+    const auto& material = model.materials.front();
+    REQUIRE(material.diffuse_image.has_value());
+
+    const auto& image = *material.diffuse_image;
+    CHECK(image.width() == 2);
+    CHECK(image.height() == 2);
+    CHECK(image.pixels().size() == 2 * 2 * 4);
+
+    SECTION("base colour is decoded as sRGB, which is what it was authored in") {
+        // Decoding it as linear is the classic way a textured character
+        // comes out washed out.
+        CHECK(image.color_space() == mgv::ColorSpace::srgb);
+    }
+    SECTION("the pixels arrive in the order they were written") {
+        const auto pixels = image.pixels();
+        CHECK(pixels[0] == 255);   // first texel red
+        CHECK(pixels[1] == 0);
+        CHECK(pixels[5] == 255);   // second texel green
+        CHECK(pixels[11] == 255);  // third texel blue
+    }
+}
+
+TEST_CASE("the model's sampler is honoured rather than defaulted") {
+    const auto model = mgv::GltfLoader{}.load(fixture("banner.gltf"));
+    const auto& sampler = model.materials.front().sampler;
+
+    // The fixture deliberately asks for something other than the glTF
+    // defaults, so a loader that ignored the sampler would be caught.
+    CHECK(sampler.mag_filter == mgv::TextureFilter::nearest);
+    CHECK(sampler.min_filter == mgv::TextureFilter::nearest);
+    CHECK(sampler.address_u == mgv::TextureAddressMode::clamp_to_edge);
+    CHECK(sampler.address_v == mgv::TextureAddressMode::mirrored_repeat);
+}

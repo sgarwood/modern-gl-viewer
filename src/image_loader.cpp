@@ -9,7 +9,9 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -71,39 +73,34 @@ namespace {
 } // namespace
 
 struct ImageLoader::Impl final {
-    [[nodiscard]] ImageData load(const std::filesystem::path& path, ColorSpace color_space) const {
-        int width{};
-        int height{};
-        int source_channels{};
+    /// Wraps whatever stb handed back, or explains why it did not.
+    [[nodiscard]] static ImageData adopt(
+        stbi_uc* decoded,
+        int width,
+        int height,
+        ColorSpace color_space,
+        std::string_view source_name) {
         constexpr int output_channels = 4;
-        auto* decoded = stbi_load(
-            path.string().c_str(),
-            &width,
-            &height,
-            &source_channels,
-            output_channels);
         if (decoded == nullptr) {
-            if (auto ppm = load_ascii_ppm(path, color_space)) {
-                return std::move(*ppm);
-            }
             const auto* reason = stbi_failure_reason();
             throw std::runtime_error{
-                "Unable to decode image '" + path.string() + "': " +
+                "Unable to decode image '" + std::string{source_name} + "': " +
                 (reason != nullptr ? reason : "unknown error")};
         }
         const auto release = [](stbi_uc* pixels) { stbi_image_free(pixels); };
         const std::unique_ptr<stbi_uc, decltype(release)> pixels{decoded, release};
         if (width <= 0 || height <= 0) {
-            throw std::runtime_error{"Decoded image has invalid dimensions: " + path.string()};
+            throw std::runtime_error{
+                "Decoded image has invalid dimensions: " + std::string{source_name}};
         }
         const auto width_size = static_cast<std::size_t>(width);
         const auto height_size = static_cast<std::size_t>(height);
         if (width_size > std::numeric_limits<std::size_t>::max() / height_size /
                              static_cast<std::size_t>(output_channels)) {
-            throw std::runtime_error{"Decoded image is too large: " + path.string()};
+            throw std::runtime_error{
+                "Decoded image is too large: " + std::string{source_name}};
         }
-        const auto pixel_count = width_size * height_size;
-        const auto byte_count = pixel_count * output_channels;
+        const auto byte_count = width_size * height_size * output_channels;
         return ImageData{
             static_cast<std::uint32_t>(width),
             static_cast<std::uint32_t>(height),
@@ -111,6 +108,40 @@ struct ImageLoader::Impl final {
             color_space,
             std::vector<std::uint8_t>{pixels.get(), pixels.get() + byte_count},
         };
+    }
+
+    [[nodiscard]] ImageData load(const std::filesystem::path& path, ColorSpace color_space) const {
+        int width{};
+        int height{};
+        int source_channels{};
+        auto* decoded = stbi_load(path.string().c_str(), &width, &height, &source_channels, 4);
+        if (decoded == nullptr) {
+            if (auto ppm = load_ascii_ppm(path, color_space)) {
+                return std::move(*ppm);
+            }
+        }
+        return adopt(decoded, width, height, color_space, path.string());
+    }
+
+    [[nodiscard]] ImageData decode(
+        std::span<const std::byte> bytes,
+        ColorSpace color_space,
+        std::string_view source_name) const {
+        if (bytes.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+            throw std::runtime_error{
+                "Encoded image is too large: " + std::string{source_name}};
+        }
+        int width{};
+        int height{};
+        int source_channels{};
+        auto* decoded = stbi_load_from_memory(
+            reinterpret_cast<const stbi_uc*>(bytes.data()),
+            static_cast<int>(bytes.size()),
+            &width,
+            &height,
+            &source_channels,
+            4);
+        return adopt(decoded, width, height, color_space, source_name);
     }
 };
 
@@ -121,6 +152,13 @@ ImageLoader& ImageLoader::operator=(ImageLoader&&) noexcept = default;
 
 ImageData ImageLoader::load(const std::filesystem::path& path, ColorSpace color_space) const {
     return impl_->load(path, color_space);
+}
+
+ImageData ImageLoader::decode(
+    std::span<const std::byte> bytes,
+    ColorSpace color_space,
+    std::string_view source_name) const {
+    return impl_->decode(bytes, color_space, source_name);
 }
 
 } // namespace mgv

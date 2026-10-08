@@ -4,6 +4,7 @@
 // it where it belongs: inside an adapter's implementation, never in a header
 // and never in the domain types this produces.
 #include "mgv/hardware/json.hpp"
+#include "mgv/image_loader.hpp"
 
 #include <algorithm>
 #include <array>
@@ -11,6 +12,8 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -129,6 +132,25 @@ public:
     [[nodiscard]] std::vector<std::uint32_t> read_integers(std::size_t accessor_index) const {
         return read<std::uint32_t>(accessor_index, false);
     }
+
+    /// The raw bytes of a buffer view, for data that is not an accessor --
+    /// an encoded image, in practice.
+    [[nodiscard]] std::span<const std::byte> view_bytes(std::size_t view_index) const {
+        const auto& view = json_.at("bufferViews").at(view_index);
+        const auto buffer_index = view.at("buffer").get<std::size_t>();
+        if (buffer_index >= buffers_.size()) {
+            throw std::runtime_error{"glTF buffer index out of range"};
+        }
+        const auto& buffer = buffers_[buffer_index];
+        const auto offset = view.value("byteOffset", std::size_t{0});
+        const auto length = view.at("byteLength").get<std::size_t>();
+        if (offset + length > buffer.size()) {
+            throw std::runtime_error{"glTF buffer view runs past the end of its buffer"};
+        }
+        return {buffer.data() + offset, length};
+    }
+
+    [[nodiscard]] const std::filesystem::path& directory() const noexcept { return directory_; }
 
     [[nodiscard]] std::size_t accessor_count(std::size_t accessor_index) const {
         return accessor(accessor_index).at("count").get<std::size_t>();
@@ -320,7 +342,82 @@ private:
         directory};
 }
 
-[[nodiscard]] std::vector<ImportedMaterial> read_materials(const Json& json) {
+[[nodiscard]] TextureAddressMode address_mode(int wrap) {
+    switch (wrap) {
+    case 33071: return TextureAddressMode::clamp_to_edge;
+    case 33648: return TextureAddressMode::mirrored_repeat;
+    default: return TextureAddressMode::repeat;  // 10497, and glTF's default
+    }
+}
+
+[[nodiscard]] TextureFilter texture_filter(int filter) {
+    // The mipmapped minification modes all reduce to linear here: there is
+    // no mip chain to choose between yet, and nearest-within-a-level is not
+    // what any of them mean.
+    return filter == 9728 || filter == 9984 || filter == 9986
+        ? TextureFilter::nearest
+        : TextureFilter::linear;
+}
+
+/// Decodes the image a texture points at, wherever it is kept.
+[[nodiscard]] std::optional<ImageData> read_image(
+    const Document& document,
+    std::size_t texture_index,
+    SamplerDescriptor& sampler) {
+    const auto& json = document.json();
+    const auto textures = json.find("textures");
+    if (textures == json.end() || texture_index >= textures->size()) {
+        return std::nullopt;
+    }
+    const auto& texture = (*textures)[texture_index];
+
+    const auto sampler_index = texture.find("sampler");
+    const auto samplers = json.find("samplers");
+    if (sampler_index != texture.end() && samplers != json.end() &&
+        sampler_index->get<std::size_t>() < samplers->size()) {
+        const auto& entry = (*samplers)[sampler_index->get<std::size_t>()];
+        sampler.address_u = address_mode(entry.value("wrapS", 10497));
+        sampler.address_v = address_mode(entry.value("wrapT", 10497));
+        sampler.mag_filter = texture_filter(entry.value("magFilter", 9729));
+        sampler.min_filter = texture_filter(entry.value("minFilter", 9729));
+    }
+
+    const auto source = texture.find("source");
+    const auto images = json.find("images");
+    if (source == texture.end() || images == json.end() ||
+        source->get<std::size_t>() >= images->size()) {
+        return std::nullopt;
+    }
+    const auto& image = (*images)[source->get<std::size_t>()];
+    const auto name = image.value("name", std::string{"image"});
+
+    const ImageLoader loader;
+    // Base colour is authored for display, so it is sRGB. Decoding it as
+    // linear is the classic way a textured character comes out washed out.
+    const auto view = image.find("bufferView");
+    if (view != image.end()) {
+        return loader.decode(
+            document.view_bytes(view->get<std::size_t>()), ColorSpace::srgb, name);
+    }
+
+    const auto uri = image.find("uri");
+    if (uri == image.end()) {
+        return std::nullopt;
+    }
+    const auto text = uri->get<std::string>();
+    if (text.starts_with("data:")) {
+        const auto comma = text.find(',');
+        if (comma == std::string::npos) {
+            return std::nullopt;
+        }
+        const auto bytes = decode_base64(std::string_view{text}.substr(comma + 1));
+        return loader.decode(bytes, ColorSpace::srgb, name);
+    }
+    return loader.load(document.directory() / text, ColorSpace::srgb);
+}
+
+[[nodiscard]] std::vector<ImportedMaterial> read_materials(const Document& document) {
+    const auto& json = document.json();
     std::vector<ImportedMaterial> materials;
     const auto entries = json.find("materials");
     if (entries == json.end()) {
@@ -341,6 +438,14 @@ private:
                 };
                 material.opacity = (*factor)[3].get<float>();
             }
+            const auto base_colour = pbr->find("baseColorTexture");
+            if (base_colour != pbr->end()) {
+                const auto index = base_colour->find("index");
+                if (index != base_colour->end()) {
+                    material.diffuse_image =
+                        read_image(document, index->get<std::size_t>(), material.sampler);
+                }
+            }
         }
         materials.push_back(std::move(material));
     }
@@ -354,7 +459,7 @@ ImportedModel GltfLoader::load(const std::filesystem::path& path) const {
     const auto& json = document.json();
 
     ImportedModel model;
-    model.materials = read_materials(json);
+    model.materials = read_materials(document);
 
     const auto meshes = json.find("meshes");
     if (meshes == json.end()) {
