@@ -43,8 +43,8 @@ types.
 - HDR RGBA16F scene target resolved through exposure, an ACES fit, sRGB, and a dither.
 - Preetham analytic daylight, a GGX/Smith metallic-roughness BRDF, and height-falloff
   aerial perspective, all in absolute radiometric units.
-- A directional shadow pass with a comparison-sampled, Poisson-filtered lookup and a
-  texel-snapped light volume.
+- Three camera-fitted directional shadow cascades with comparison-sampled,
+  Poisson-filtered lookups and texel-snapped light volumes.
 - Generated course terrain that reproduces the physics heightmap across the green and
   runs out to the horizon, with per-vertex surface classes and normal-tilted mower stripes.
 - GLSL `#include` with relative resolution, include-once, and cycle detection.

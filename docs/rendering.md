@@ -7,7 +7,7 @@ radiometric units, and resolves to the display once at the end of the frame.
 
 `Frame` carries everything constant for a frame: the view, projection, and
 view-projection matrices, the camera position, elapsed time, the sun's shadow
-matrix, and an `Environment`. Frontends fill in only the viewport;
+cascade matrices and split depths, and an `Environment`. Frontends fill in only the viewport;
 `Renderer::render` derives the rest and hands the completed frame to
 `RenderBackend::begin_frame`. No shader recovers a world-space quantity from a
 model-view-projection matrix.
@@ -32,7 +32,8 @@ declares, which keeps the minimal viewer shaders valid.
 | `uFogDensity`, `uFogHeightFalloff` | aerial perspective |
 | `uWindSpeed`, `uWindDirection` | wind, for foliage |
 | `uSurfaceWetness` | 0 dry to 1 saturated |
-| `uSunViewProjection`, `uShadowMap`, `uShadowTexelSize` | shadow lookup |
+| `uSunViewProjections[4]`, `uShadowCascadeSplits[4]`, `uShadowCascadeCount` | camera-fitted shadow cascades |
+| `uShadowMap`, `uShadowTexelSize` | comparison-sampled depth array and texel scale |
 | `uTrailCount`, `uTrailPositions` | where the ball has rolled |
 | `uViewportSize` | framebuffer size in pixels |
 
@@ -49,13 +50,17 @@ fairway around mid grey.
 
 ## Passes
 
-1. **Shadow.** Casters are drawn into a 2048² depth target from the sun's
-   point of view, through one trivial depth program rather than a depth
-   variant of every material. A renderable can decline to cast; the sky dome
-   does, since it surrounds the camera.
+1. **Shadow.** The camera frustum is divided into three practical
+   logarithmic/uniform slices out to 160 m. Casters are drawn into one 2048²
+   depth-array layer per slice from the sun's point of view, through one
+   trivial depth program rather than a depth variant of every material. Each
+   fitted light volume is snapped to its own texel grid. A renderable can
+   decline to cast; the sky dome and fine grass blades do, since their
+   geometry is either enclosing or smaller than a shadow texel.
 2. **Colour.** The scene is drawn into the floating-point target. Surfaces
-   sample the shadow map through a hardware comparison sampler with a rotated
-   eight-tap Poisson kernel.
+   choose a cascade from positive view depth and sample its depth-array layer
+   through a hardware comparison sampler with a rotated eight-tap Poisson
+   kernel.
 3. **Composite.** Exposure, tone map, encode, dither, resolve to whatever
    framebuffer the host had bound.
 
@@ -66,6 +71,16 @@ it, and it draws straight to the output rather than producing a blank window.
 The host owns the output framebuffer. `QOpenGLWidget` and `mgv_capture` each
 render into one of their own, so the backend captures the binding at
 `begin_frame` and restores it for the resolve.
+
+`ShadowVolume` retains the established name but also owns the portable cascade
+policy: count, maximum distance, split lambda, caster distance, and resolution.
+The renderer computes the matrices and drives one backend pass per cascade;
+OpenGL owns only the depth-array representation. Four cascades are the public
+maximum. The default of three is a deliberate balance: the near green keeps
+contact-shadow detail while trees and terrain continue receiving shadows well
+beyond the old single 60 m volume. The cost is three submissions of each
+eligible caster, so per-cascade caster culling and cached static layers are the
+next optimisations if profiling calls for them.
 
 ## Shader modules
 
