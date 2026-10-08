@@ -193,6 +193,11 @@ public:
     bool update_mesh(EntityId entity, const MeshData& mesh);
     void add_foliage_volume(physics::FoliageVolume volume);
 
+    /// Switches an animation player to another clip and plays it from the
+    /// start. Immediate, not queued: a swing has to begin on the frame the
+    /// ball was struck, not on the next one.
+    void play_clip(animation::AnimationPlayerId player, animation::AnimationClipId clip);
+
     void enqueue(EngineCommand command);
     void enqueue(InputAction action);
     void submit_shot(golf::Shot shot);

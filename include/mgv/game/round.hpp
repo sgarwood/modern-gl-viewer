@@ -12,8 +12,13 @@ namespace mgv::game {
 enum class RoundState {
     /// Standing over a ball at rest, waiting for it to be struck.
     addressing,
+    /// The ball has just been struck hard, and the camera is held on the
+    /// player while they finish their swing.
+    following_through,
     /// The ball is moving.
     in_flight,
+    /// The camera has pulled back and is following the ball down its flight.
+    tracing,
     /// Following the ball to wherever it came to rest.
     walking,
     /// The ball is in the cup and the camera is looking into it.
@@ -31,6 +36,9 @@ enum class RoundState {
 enum class RoundEvent {
     none,
     ball_struck,
+    /// Struck far enough to be worth watching: the player finishes their
+    /// swing and the camera pulls back to follow the ball.
+    long_shot_struck,
     ball_came_to_rest,
     ball_holed,
     reached_ball,
@@ -66,6 +74,21 @@ struct RoundRules final {
     float at_rest_speed{0.05F};
     /// Above this speed it counts as struck, in m/s.
     float struck_speed{1.0F};
+    /// A shot estimated to carry at least this far is worth watching, in
+    /// metres. A hundred and twenty yards.
+    float long_shot_distance{109.7F};
+    /// How long the camera holds on the player's finish before it pulls
+    /// back, in seconds.
+    float follow_through_duration{1.15F};
+    /// How long the pull-back takes once it starts, in seconds.
+    float trace_pull_back_duration{1.4F};
+    /// How far behind the player the tracing camera settles, in metres.
+    float trace_distance{17.0F};
+    /// How high above the player it settles, in metres.
+    float trace_height{7.5F};
+    /// How far to the side the camera stands to watch the finish, in metres.
+    /// Far enough to see the whole turn, close enough that it reads.
+    float follow_through_distance{4.6F};
     /// Eye height above the ground, in metres.
     float eye_height{1.62F};
     /// How far behind the ball the player stands to address it.
@@ -85,8 +108,13 @@ struct RoundObservation final {
     /// Seconds since the previous update.
     float elapsed_seconds{};
     Vec3 ball_position{};
-    /// Speed of the ball, in m/s.
-    float ball_speed{};
+    /// Velocity of the ball, in m/s.
+    ///
+    /// The whole vector, not just its magnitude: how far a struck ball will
+    /// carry depends on how steeply it left, and the round has to decide
+    /// whether a shot is worth watching at the moment of impact, long before
+    /// the physics has an answer.
+    Vec3 ball_velocity{};
 };
 
 /// What the round decided, and where it wants the camera.
@@ -103,6 +131,15 @@ struct RoundUpdate final {
     /// that wants the stance camera anyway can have it.
     Vec3 eye{};
     Vec3 look_at{};
+    /// Where the player is standing, on the ground, and the compass bearing
+    /// they face.
+    ///
+    /// The round already has to know this to place the camera, and a third
+    /// person view needs the character to stand in the same place the round
+    /// thinks they do -- otherwise the swing being watched and the swing
+    /// being simulated are two different events.
+    Vec3 player_position{};
+    float player_facing_degrees{};
 };
 
 /// The state machine for a round of golf: what is happening, and where the
@@ -138,6 +175,15 @@ public:
 
     [[nodiscard]] RoundState state() const noexcept;
     [[nodiscard]] const RoundRules& rules() const noexcept;
+
+    /// Roughly how far a ball leaving at this velocity will carry, in
+    /// metres.
+    ///
+    /// The vacuum range. A real golf ball's backspin generates lift and
+    /// carries it further, so this understates a struck shot, and it is
+    /// used only to decide which camera to use -- never for anything the
+    /// physics is responsible for.
+    [[nodiscard]] static float estimated_carry(Vec3 velocity) noexcept;
     void set_rules(RoundRules rules);
 
 private:

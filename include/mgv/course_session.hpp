@@ -48,7 +48,11 @@ struct CourseViewpoint final {
 struct CourseCharacter final {
     std::filesystem::path model;
     std::filesystem::path skeleton;
+    /// The clip the character plays while nothing else is happening.
     std::filesystem::path animation;
+    /// The clip played when a shot worth watching is struck. Optional: with
+    /// none, the character simply keeps idling through the swing.
+    std::filesystem::path follow_through;
     /// Where the character stands, in the ground plane.
     Vec2 position{};
     /// Compass bearing it faces, degrees.
@@ -138,6 +142,16 @@ struct CourseSession final {
     Vec2 terrain_centre{};
     /// Where the blade field is currently centred.
     Vec2 grass_centre{};
+    /// The character entity, if the session placed one, and whether its
+    /// asset needed standing upright.
+    std::optional<EntityId> character{};
+    bool character_z_up{};
+    float character_scale{1.0F};
+    /// The character's animation player, if the session placed one.
+    std::optional<animation::AnimationPlayerId> character_player{};
+    /// Its idle and follow-through clips.
+    std::optional<animation::AnimationClipId> idle_clip{};
+    std::optional<animation::AnimationClipId> follow_through_clip{};
     /// The round being played, and the ground it walks over. Held by shared
     /// pointer because a session is passed around by value and the round
     /// holds a reference to its ground.
@@ -149,6 +163,13 @@ struct CourseSession final {
 /// Frontends call this each frame, alongside `stream_course`. The round is
 /// deliberately not inside `Engine::tick`: the engine is a renderer runtime,
 /// and the rules of golf are not its business.
+/// What stage of the shot the session's round is at.
+///
+/// The round itself is held behind an opaque type so that callers do not
+/// depend on how a course keeps its ground; this is the one fact about it
+/// that a host needs often enough to be worth exposing.
+[[nodiscard]] game::RoundState round_state(const CourseSession& session);
+
 game::RoundEvent advance_round(
     Engine& engine,
     const CourseSession& session,

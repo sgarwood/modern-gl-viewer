@@ -549,6 +549,13 @@ void Engine::remove(EntityId entity) {
     impl_->entities.erase(found);
 }
 
+void Engine::play_clip(
+    animation::AnimationPlayerId player,
+    animation::AnimationClipId clip) {
+    impl_->animation_system.set_clip(player, clip);
+    impl_->animation_system.play(player);
+}
+
 void Engine::enqueue(EngineCommand command) {
     impl_->enqueue(std::move(command));
 }

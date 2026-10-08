@@ -13,6 +13,7 @@
 #include <QByteArray>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
+#include <QDir>
 #include <QGuiApplication>
 #include <QImage>
 #include <QOffscreenSurface>
@@ -31,6 +32,30 @@
 
 namespace {
 
+/// A clock that advances a fixed step each time the engine ticks.
+///
+/// A capture renders as fast as the machine allows, so wall-clock time
+/// between ticks is however long a frame happened to take. Driving the
+/// engine from it makes a captured sequence unrepeatable and, worse,
+/// untruthful: a ball's flight would last as long as the renderer felt like
+/// rather than as long as the physics says.
+class FixedStepClock final : public mgv::Clock {
+public:
+    explicit FixedStepClock(std::chrono::duration<double> step) : step_{step} {}
+
+    [[nodiscard]] time_point now() const noexcept override {
+        const auto at = origin_ + std::chrono::duration_cast<time_point::duration>(step_ * ticks_);
+        ++ticks_;
+        return at;
+    }
+
+private:
+    time_point origin_{};
+    std::chrono::duration<double> step_;
+    mutable long long ticks_{};
+};
+
+
 [[nodiscard]] std::filesystem::path path_from(const QString& value) {
     return std::filesystem::path{value.toStdString()};
 }
@@ -44,6 +69,7 @@ namespace {
 [[nodiscard]] const char* round_event_name(mgv::game::RoundEvent event) {
     switch (event) {
     case mgv::game::RoundEvent::ball_struck: return "ball struck";
+    case mgv::game::RoundEvent::long_shot_struck: return "long shot struck";
     case mgv::game::RoundEvent::ball_came_to_rest: return "ball came to rest";
     case mgv::game::RoundEvent::ball_holed: return "ball holed";
     case mgv::game::RoundEvent::reached_ball: return "reached ball";
@@ -132,6 +158,16 @@ int main(int argc, char** argv) {
         "character-scale", "Uniform scale for the character.", "scale"};
     const QCommandLineOption character_z_up_option{
         "character-z-up", "Stand a Z-up asset upright."};
+    const QCommandLineOption follow_through_option{
+        "follow-through", "Clip the character plays when a long shot is struck.", "ozz"};
+    const QCommandLineOption trace_option{
+        "trace", "Print the round state and camera as the sequence runs."};
+    const QCommandLineOption rate_option{
+        "fps", "Frames per second the fixed-step clock advances at.", "hz", "60"};
+    const QCommandLineOption frame_dir_option{
+        "frames-to",
+        "Write every frame into this directory, to watch a sequence play out.",
+        "directory"};
     const QCommandLineOption shot_option{
         "shot", "Fire the deterministic test shot on the first frame."};
     const QCommandLineOption walk_option{
@@ -165,6 +201,10 @@ int main(int argc, char** argv) {
                                character_at_option,
                                character_scale_option,
                                character_z_up_option,
+                               follow_through_option,
+                               frame_dir_option,
+                               rate_option,
+                               trace_option,
                                camera_option,
                                target_option,
                                fov_option,
@@ -213,9 +253,12 @@ int main(int argc, char** argv) {
     }
 
     try {
-        auto engine = std::make_unique<mgv::Engine>(mgv::make_opengl_backend([&context](const char* name) {
-            return context.getProcAddress(QByteArray{name});
-        }));
+        const auto fps = std::max(parser.value(rate_option).toDouble(), 1.0);
+        auto engine = std::make_unique<mgv::Engine>(
+            mgv::make_opengl_backend([&context](const char* name) {
+                return context.getProcAddress(QByteArray{name});
+            }),
+            std::make_unique<FixedStepClock>(std::chrono::duration<double>{1.0 / fps}));
 
         auto description = mgv::default_course_session(asset_directory);
         if (parser.isSet(model_option)) {
@@ -277,6 +320,9 @@ int main(int argc, char** argv) {
             character.model = path_from(parts[0].trimmed());
             character.skeleton = path_from(parts[1].trimmed());
             character.animation = path_from(parts[2].trimmed());
+            if (parser.isSet(follow_through_option)) {
+                character.follow_through = path_from(parser.value(follow_through_option));
+            }
             if (parser.isSet(character_at_option)) {
                 const auto at = parse_vec3(parser.value(character_at_option));
                 if (!at) {
@@ -341,9 +387,38 @@ int main(int argc, char** argv) {
             streamed += mgv::stream_course(*engine, session, description) ? 1 : 0;
             const auto event = mgv::advance_round(*engine, session, description);
             if (event != mgv::game::RoundEvent::none) {
-                std::printf("round: %s\n", round_event_name(event));
+                std::printf("frame %d  round: %s\n", frame, round_event_name(event));
+            }
+            if (parser.isSet(trace_option) && frame % 20 == 0) {
+                const auto at = engine->camera().position();
+                const auto to = engine->camera().target();
+                const auto lie = engine->transform(session.ball).position();
+                std::printf(
+                    "frame %3d  state=%d  camera=(%.1f, %.1f, %.1f)->(%.1f, %.1f, %.1f)  ball=(%.1f, %.1f, %.1f)",
+                    frame, static_cast<int>(mgv::round_state(session)),
+                    at.x, at.y, at.z, to.x, to.y, to.z, lie.x, lie.y, lie.z);
+                if (session.character) {
+                    const auto who = engine->transform(*session.character);
+                    const auto p = who.position();
+                    std::printf("  player=(%.1f, %.1f, %.1f) scale=%.2f",
+                                p.x, p.y, p.z, who.scale().x);
+                }
+                std::printf("\n");
             }
             engine->tick({width, height});
+            if (parser.isSet(frame_dir_option)) {
+                const auto directory = parser.value(frame_dir_option);
+                QDir{}.mkpath(directory);
+                const auto name = QString{"%1/frame-%2.png"}
+                                      .arg(directory)
+                                      .arg(frame, 4, 10, QChar{'0'});
+                static_cast<void>(framebuffer.toImage().save(name, "PNG"));
+                // toImage() leaves the default framebuffer bound. Without
+                // binding ours again every later frame renders to the
+                // window system's buffer, and the sequence comes out as the
+                // first frame repeated.
+                static_cast<void>(framebuffer.bind());
+            }
         }
         std::printf("streamed=%d\n", streamed);
         const auto eye = engine->camera().position();

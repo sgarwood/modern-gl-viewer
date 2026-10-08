@@ -7,6 +7,41 @@ It knows nothing of the renderer, the physics world, or the engine. It is
 given what was observed and returns what it decided, which is what lets it be
 tested without a window — see `tests/game/round_test.cpp`.
 
+## Watching a shot
+
+A long shot runs three stages rather than one. The round classifies the
+strike at impact, from the whole launch velocity rather than its speed
+alone -- how far a ball carries depends on how steeply it left, and a round
+deciding on speed would treat a flat drive and a pop-up as the same event.
+The estimate is the vacuum range. Backspin generates lift and carries a real
+ball further, so a shot the estimate calls long certainly is one, and it is
+used only to choose a camera, never for anything the physics owns.
+
+| Stage | What the camera does |
+| --- | --- |
+| `following_through` | Holds off the player's front side at chest height, square to the shot, for `follow_through_duration`. |
+| `tracing` | Eases back and up to `trace_distance` behind and `trace_height` above, keeping the ball framed. |
+| `in_flight` | The plain follow, used for anything shorter than `long_shot_distance`. |
+
+A chip skips both and goes straight to `in_flight`: it is over before a
+camera could finish moving, and cutting away from the player to watch it
+would be worse than not cutting at all.
+
+Both the position and the aim ease. Snapping the aim to the ball when the
+pull-back begins throws the player out of frame on the first traced frame
+and reads as a cut, which defeats the point of moving the camera.
+
+The round also publishes `player_position` and `player_facing_degrees` on
+every update. A third person view needs the character to stand where the
+round thinks they do, or the swing being watched and the swing being
+simulated are two different events. Note that these are *footing*, not eye
+height: `stance_for()` answers in eye positions because that is what the
+camera wants, and a character stood on one hovers a head above the turf.
+
+Which clip a finish corresponds to is the session's business -- the round
+emits `long_shot_struck` and knows nothing of animation.
+
+
 ## Why it is not in the engine
 
 It was. The state machine lived inside `Engine::tick`, between the animation

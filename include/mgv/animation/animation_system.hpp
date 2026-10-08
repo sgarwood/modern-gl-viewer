@@ -53,6 +53,14 @@ public:
     [[nodiscard]] bool remove_player(AnimationPlayerId player);
     void clear_players() noexcept;
 
+    /// Re-points a player at another clip, from the start.
+    ///
+    /// The two clips must be built on skeletons of the same size, which is
+    /// the one thing a player's buffers depend on. Swapping a clip is how a
+    /// character changes what it is doing without losing the binding that
+    /// says which mesh it deforms.
+    void set_clip(AnimationPlayerId player, AnimationClipId clip);
+
     void play(AnimationPlayerId player);
     void pause(AnimationPlayerId player);
     void stop(AnimationPlayerId player);

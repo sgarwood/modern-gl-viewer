@@ -21,6 +21,11 @@ namespace {
     return {value.x * factor, value.y * factor, value.z * factor};
 }
 
+[[nodiscard]] float speed(Vec3 velocity) noexcept {
+    return std::sqrt(
+        velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z);
+}
+
 [[nodiscard]] float length(Vec3 value) noexcept {
     return std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
 }
@@ -79,6 +84,37 @@ struct Round::Impl final {
     float sway_time{};
     Vec3 walk_from{};
     Vec3 walk_to{};
+    /// Where the player was standing when they struck the ball. The finish
+    /// is watched from here and the pull-back is anchored to it, because the
+    /// ball is long gone by the time either happens.
+    Vec3 swing_stance{};
+    Vec3 swing_ball{};
+    float swing_facing{};
+
+    /// Where the player's feet are, as opposed to their eyes.
+    ///
+    /// stance_for() answers with an eye position because that is what the
+    /// camera wants. Standing a character on it leaves them hovering a head
+    /// and shoulders above the turf.
+    [[nodiscard]] Vec3 footing_for(Vec3 ball) const {
+        const auto stance = stance_for(ball);
+        return on_ground({stance.x, 0.0F, stance.z}, 0.0F);
+    }
+
+    [[nodiscard]] float aim_bearing(Vec3 from) const {
+        const auto hole = hole_position();
+        return direction_to_bearing({hole.x - from.x, 0.0F, hole.z - from.z});
+    }
+
+    /// Where a camera stands to watch the swing: off the player's front
+    /// side, square to the shot, so the turn shows in profile.
+    [[nodiscard]] Vec3 watch_position(float distance, float height) const {
+        const auto down_the_line = normalized(
+            subtract(hole_position(), swing_stance), {0.0F, 0.0F, -1.0F});
+        const Vec3 square{-down_the_line.z, 0.0F, down_the_line.x};
+        const auto at = add(swing_stance, scaled(square, distance));
+        return on_ground({at.x, 0.0F, at.z}, height);
+    }
     Vec3 sight_from{};
     Vec3 sight_at{};
     bool sighting{};
@@ -115,6 +151,18 @@ RoundEvent Round::toggle_range_finder(const RoundObservation& observation) {
     impl_->sight_from = impl_->stance_for(observation.ball_position);
     impl_->sight_at = impl_->hole_position();
     return RoundEvent::range_finder_deployed;
+}
+
+float Round::estimated_carry(Vec3 velocity) noexcept {
+    const auto horizontal = std::sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
+    if (velocity.y <= 0.0F || horizontal <= 0.0F) {
+        return 0.0F;
+    }
+    // Range of a projectile over level ground: two flight halves, each
+    // taking v_y / g. Lift from backspin carries a real golf ball further
+    // than this, so a shot classed as long by it certainly is one.
+    constexpr float gravity = 9.81F;
+    return 2.0F * velocity.y * horizontal / gravity;
 }
 
 float Round::aim_bearing_degrees(Vec3 ball) const {
@@ -154,19 +202,48 @@ RoundUpdate Round::update(const RoundObservation& observation) {
             .directs_camera = true,
             .eye = self.sight_from,
             .look_at = aim,
+            .player_position = self.footing_for(ball),
+            .player_facing_degrees = self.aim_bearing(ball),
         };
     }
 
     switch (self.state) {
     case RoundState::addressing:
-        if (observation.ball_speed > rules.struck_speed) {
-            self.state = RoundState::in_flight;
-            event = RoundEvent::ball_struck;
+        if (speed(observation.ball_velocity) > rules.struck_speed) {
+            self.swing_stance = self.footing_for(ball);
+            self.swing_ball = ball;
+            self.swing_facing = self.aim_bearing(ball);
+            self.timer = 0.0F;
+            if (estimated_carry(observation.ball_velocity) >= rules.long_shot_distance) {
+                self.state = RoundState::following_through;
+                event = RoundEvent::long_shot_struck;
+            } else {
+                // A chip is over before a camera could finish moving, and
+                // cutting away from the player to watch it would be worse
+                // than not cutting at all.
+                self.state = RoundState::in_flight;
+                event = RoundEvent::ball_struck;
+            }
         }
         break;
 
+    case RoundState::following_through:
+        self.timer += observation.elapsed_seconds;
+        if (self.timer >= std::max(rules.follow_through_duration, 1.0e-3F)) {
+            self.state = RoundState::tracing;
+            self.timer = 0.0F;
+        }
+        break;
+
+    case RoundState::tracing:
+        self.timer += observation.elapsed_seconds;
+        if (speed(observation.ball_velocity) <= rules.at_rest_speed) {
+            self.state = RoundState::in_flight;   // resolved below, same frame
+        }
+        [[fallthrough]];
+
     case RoundState::in_flight:
-        if (observation.ball_speed <= rules.at_rest_speed) {
+        if (speed(observation.ball_velocity) <= rules.at_rest_speed) {
             const auto hole = self.hole_position();
             const auto across = std::sqrt(
                 (ball.x - hole.x) * (ball.x - hole.x) + (ball.z - hole.z) * (ball.z - hole.z));
@@ -204,8 +281,60 @@ RoundUpdate Round::update(const RoundObservation& observation) {
         break;
     }
 
+    // Where the player is standing. Walking moves them; everything else
+    // leaves them at the stance for wherever the ball is lying.
+    const auto walk_or_stance = [&] {
+        if (self.state != RoundState::walking) {
+            return self.footing_for(ball);
+        }
+        const auto t = ease(self.timer / std::max(rules.walk_duration, 1.0e-3F));
+        const auto between = add(scaled(self.walk_from, 1.0F - t), scaled(self.walk_to, t));
+        return self.on_ground({between.x, 0.0F, between.z}, 0.0F);
+    }();
+
     // --- where the camera goes ----------------------------------------------
     switch (self.state) {
+    case RoundState::following_through: {
+        // Stood off to the side at chest height, looking back at the player,
+        // so the turn through the ball reads. A camera at the player's own
+        // eyes would show the swing from inside it, which is to say not at
+        // all. The ball is not in shot and does not need to be.
+        return {
+            .state = self.state,
+            .event = event,
+            .directs_camera = true,
+            .eye = self.watch_position(rules.follow_through_distance, rules.eye_height),
+            .look_at = self.on_ground(
+                {self.swing_stance.x, 0.0F, self.swing_stance.z}, rules.eye_height * 0.78F),
+            .player_position = self.swing_stance,
+            .player_facing_degrees = self.swing_facing,
+        };
+    }
+    case RoundState::tracing: {
+        // Ease back and up from where the swing was watched to a wide
+        // position behind it, keeping the ball framed the whole way. The
+        // pull-back is what turns following a ball into watching a shot.
+        const auto t = ease(self.timer / std::max(rules.trace_pull_back_duration, 1.0e-3F));
+        const auto from_hole = subtract(self.swing_stance, self.hole_position());
+        const auto behind = normalized({from_hole.x, 0.0F, from_hole.z}, {0.0F, 0.0F, 1.0F});
+        const auto wide = self.on_ground(
+            add(self.swing_stance, scaled(behind, rules.trace_distance)), rules.trace_height);
+        const auto near = self.watch_position(rules.follow_through_distance, rules.eye_height);
+        // The look-at eases too. Snapping it to the ball the moment the
+        // pull-back begins throws the player out of frame and reads as a
+        // cut, which defeats the point of moving the camera at all.
+        const auto chest = self.on_ground(
+            {self.swing_stance.x, 0.0F, self.swing_stance.z}, rules.eye_height * 0.78F);
+        return {
+            .state = self.state,
+            .event = event,
+            .directs_camera = true,
+            .eye = add(scaled(near, 1.0F - t), scaled(wide, t)),
+            .look_at = add(scaled(chest, 1.0F - t), scaled(ball, t)),
+            .player_position = self.swing_stance,
+            .player_facing_degrees = self.swing_facing,
+        };
+    }
     case RoundState::in_flight: {
         // Behind and above the ball, following it down.
         const auto behind = self.on_ground(
@@ -217,6 +346,8 @@ RoundUpdate Round::update(const RoundObservation& observation) {
             .directs_camera = true,
             .eye = behind,
             .look_at = ball,
+            .player_position = walk_or_stance,
+            .player_facing_degrees = self.aim_bearing(ball),
         };
     }
     case RoundState::walking: {
@@ -232,6 +363,8 @@ RoundUpdate Round::update(const RoundObservation& observation) {
             .directs_camera = true,
             .eye = eye,
             .look_at = ball,
+            .player_position = walk_or_stance,
+            .player_facing_degrees = self.aim_bearing(ball),
         };
     }
     case RoundState::holing_out: {
@@ -247,6 +380,8 @@ RoundUpdate Round::update(const RoundObservation& observation) {
             .directs_camera = true,
             .eye = eye,
             .look_at = hole,
+            .player_position = walk_or_stance,
+            .player_facing_degrees = self.aim_bearing(ball),
         };
     }
     case RoundState::addressing:
@@ -262,6 +397,8 @@ RoundUpdate Round::update(const RoundObservation& observation) {
             .directs_camera = false,
             .eye = eye,
             .look_at = ball,
+            .player_position = walk_or_stance,
+            .player_facing_degrees = self.aim_bearing(ball),
         };
     }
     }

@@ -26,7 +26,19 @@ public:
 }
 
 [[nodiscard]] mgv::game::RoundObservation resting_at(mgv::Vec3 ball) {
-    return {.elapsed_seconds = 1.0F / 60.0F, .ball_position = ball, .ball_speed = 0.0F};
+    return {.elapsed_seconds = 1.0F / 60.0F, .ball_position = ball, .ball_velocity = {}};
+}
+
+/// A strike too weak to be worth a camera move: a chip, not a drive.
+[[nodiscard]] mgv::game::RoundObservation chipped_from(mgv::Vec3 ball) {
+    return {.elapsed_seconds = 0.016F, .ball_position = ball,
+            .ball_velocity = {0.0F, 6.0F, -8.0F}};
+}
+
+/// A full shot, launched down -Z at fifteen degrees.
+[[nodiscard]] mgv::game::RoundObservation driven_from(mgv::Vec3 ball) {
+    return {.elapsed_seconds = 0.016F, .ball_position = ball,
+            .ball_velocity = {0.0F, 14.2F, -53.1F}};
 }
 
 } // namespace
@@ -56,7 +68,7 @@ TEST_CASE("striking the ball puts the round in flight, and resting ends it") {
     static_cast<void>(round.update(resting_at({0.0F, 0.02F, 0.0F})));
 
     const auto struck = round.update(
-        {.elapsed_seconds = 0.016F, .ball_position = {0.0F, 1.0F, -5.0F}, .ball_speed = 40.0F});
+        {.elapsed_seconds = 0.016F, .ball_position = {0.0F, 1.0F, -5.0F}, .ball_velocity = {0.0F, 0.0F, -40.0F}});
     CHECK(struck.state == mgv::game::RoundState::in_flight);
     CHECK(struck.event == mgv::game::RoundEvent::ball_struck);
 
@@ -70,7 +82,7 @@ TEST_CASE("a ball that stops in the cup is holed, not walked to") {
     auto rules = rules_with_hole_at({3.0F, -40.0F});
     mgv::game::Round round{rules, ground};
     static_cast<void>(round.update(
-        {.elapsed_seconds = 0.016F, .ball_position = {3.0F, 0.02F, -20.0F}, .ball_speed = 9.0F}));
+        {.elapsed_seconds = 0.016F, .ball_position = {3.0F, 0.02F, -20.0F}, .ball_velocity = {0.0F, 0.0F, -9.0F}}));
 
     const auto holed = round.update(resting_at({3.02F, 0.02F, -40.01F}));
 
@@ -80,7 +92,7 @@ TEST_CASE("a ball that stops in the cup is holed, not walked to") {
     SECTION("the cup is wherever the rules say, not a hardcoded point") {
         mgv::game::Round elsewhere{rules_with_hole_at({-88.0F, 150.0F}), ground};
         static_cast<void>(elsewhere.update(
-            {.elapsed_seconds = 0.016F, .ball_position = {}, .ball_speed = 9.0F}));
+            {.elapsed_seconds = 0.016F, .ball_position = {}, .ball_velocity = {0.0F, 0.0F, -9.0F}}));
         // The same resting place is nowhere near this hole.
         const auto missed = elsewhere.update(resting_at({3.02F, 0.02F, -40.01F}));
         CHECK(missed.event == mgv::game::RoundEvent::ball_came_to_rest);
@@ -95,7 +107,7 @@ TEST_CASE("the walk ends at the ball, in the time the rules allow") {
 
     static_cast<void>(round.update(resting_at({0.0F, 0.02F, 0.0F})));
     static_cast<void>(round.update(
-        {.elapsed_seconds = 0.016F, .ball_position = {0.0F, 2.0F, -10.0F}, .ball_speed = 30.0F}));
+        {.elapsed_seconds = 0.016F, .ball_position = {0.0F, 2.0F, -10.0F}, .ball_velocity = {0.0F, 0.0F, -30.0F}}));
     const mgv::Vec3 lie{4.0F, 0.02F, -30.0F};
     static_cast<void>(round.update(resting_at(lie)));
 
@@ -124,7 +136,7 @@ TEST_CASE("the camera walks over a hill rather than through it") {
 
     static_cast<void>(round.update(resting_at({0.0F, 0.0F, 0.0F})));
     static_cast<void>(round.update(
-        {.elapsed_seconds = 0.016F, .ball_position = {0.0F, 4.0F, -40.0F}, .ball_speed = 40.0F}));
+        {.elapsed_seconds = 0.016F, .ball_position = {0.0F, 4.0F, -40.0F}, .ball_velocity = {0.0F, 0.0F, -40.0F}}));
     const mgv::Vec3 lie{0.0F, 6.4F, -80.0F};
     static_cast<void>(round.update(resting_at(lie)));
 
@@ -189,7 +201,7 @@ TEST_CASE("the range finder can be raised mid-walk and gives the walk back") {
     const auto resting = resting_at({0.0F, 0.02F, -40.0F});
     static_cast<void>(round.update(resting_at({0.0F, 0.02F, 0.0F})));
     static_cast<void>(round.update(
-        {.elapsed_seconds = 0.016F, .ball_position = {}, .ball_speed = 30.0F}));
+        {.elapsed_seconds = 0.016F, .ball_position = {}, .ball_velocity = {0.0F, 0.0F, -30.0F}}));
     static_cast<void>(round.update(resting));
     REQUIRE(round.state() == mgv::game::RoundState::walking);
 
@@ -214,7 +226,7 @@ TEST_CASE("the round takes the camera only when it is staging something") {
 
     SECTION("a struck ball, the walk after it, and the range finder do not") {
         const auto struck = round.update(
-            {.elapsed_seconds = 0.016F, .ball_position = {}, .ball_speed = 30.0F});
+            {.elapsed_seconds = 0.016F, .ball_position = {}, .ball_velocity = {0.0F, 0.0F, -30.0F}});
         CHECK(struck.directs_camera);
 
         const auto landed = round.update(resting_at({0.0F, 0.02F, -70.0F}));
@@ -254,5 +266,172 @@ TEST_CASE("the round knows which way the green lies") {
             CHECK(bearing >= -180.0F);
             CHECK(bearing <= 180.0F);
         }
+    }
+}
+
+TEST_CASE("carry is estimated from the whole launch velocity, not its speed alone") {
+    // Forty-five degrees carries furthest in a vacuum, and a ball driven
+    // flat or popped straight up carries less at the same speed. A round
+    // deciding on speed alone would treat all three the same.
+    const auto flat = mgv::game::Round::estimated_carry({0.0F, 5.0F, -50.0F});
+    const auto best = mgv::game::Round::estimated_carry({0.0F, 35.6F, -35.6F});
+    const auto popped = mgv::game::Round::estimated_carry({0.0F, 50.0F, -5.0F});
+
+    CHECK(best > flat);
+    CHECK(best > popped);
+    SECTION("the optimum matches the closed form") {
+        CHECK(best == Catch::Approx(50.0F * 50.0F / 9.81F).epsilon(0.02F));
+    }
+    SECTION("a ball going nowhere carries nothing") {
+        CHECK(mgv::game::Round::estimated_carry({}) == Catch::Approx(0.0F));
+    }
+    SECTION("a ball driven into the ground does not carry backwards") {
+        CHECK(mgv::game::Round::estimated_carry({0.0F, -20.0F, -40.0F}) >= 0.0F);
+    }
+}
+
+TEST_CASE("a long shot runs follow-through, then tracing, then the walk") {
+    const Flat ground;
+    mgv::game::Round round{rules_with_hole_at({0.0F, -220.0F}), ground};
+    static_cast<void>(round.update(resting_at({0.0F, 0.02F, 0.0F})));
+
+    const auto struck = round.update(driven_from({0.0F, 0.1F, 0.0F}));
+    CHECK(struck.event == mgv::game::RoundEvent::long_shot_struck);
+    CHECK(struck.state == mgv::game::RoundState::following_through);
+
+    SECTION("the camera holds on the player while they finish") {
+        // Not on the ball: the ball is already fifty metres away and the
+        // point of the shot is watching the swing end.
+        const auto eye = struck.eye;
+        const auto held = round.update(driven_from({0.0F, 12.0F, -50.0F}));
+        CHECK(held.state == mgv::game::RoundState::following_through);
+        CHECK(held.eye.x == Catch::Approx(eye.x).margin(0.5F));
+        CHECK(held.eye.z == Catch::Approx(eye.z).margin(0.5F));
+    }
+
+    SECTION("then it pulls back and traces the ball") {
+        auto flying = struck;
+        for (int step = 0; step < 90 && flying.state != mgv::game::RoundState::tracing; ++step) {
+            flying = round.update(driven_from({0.0F, 20.0F, -80.0F}));
+        }
+        REQUIRE(flying.state == mgv::game::RoundState::tracing);
+        CHECK(flying.directs_camera);
+
+        // Once the pull-back has run its course, tracing looks at the
+        // ball, wherever it is. Getting there is eased rather than cut, so
+        // the aim is only on the ball at the end of the move.
+        mgv::game::RoundUpdate high{};
+        for (int step = 0; step < 200; ++step) {
+            high = round.update(driven_from({0.0F, 30.0F, -140.0F}));
+        }
+        CHECK(high.look_at.z == Catch::Approx(-140.0F).margin(0.5F));
+        CHECK(high.look_at.y == Catch::Approx(30.0F).margin(0.5F));
+    }
+
+    SECTION("and the camera really does pull out, not just follow") {
+        mgv::game::RoundUpdate update{};
+        auto nearest = 1.0e9F;
+        auto furthest = 0.0F;
+        for (int step = 0; step < 300; ++step) {
+            update = round.update(driven_from({0.0F, 20.0F, -80.0F}));
+            if (update.state != mgv::game::RoundState::tracing) {
+                continue;
+            }
+            // Measured from where the swing was played, which is itself a
+            // stance behind the ball -- not from the world origin.
+            const auto stance_z = round.rules().stance_distance;
+            const auto back = std::sqrt(
+                update.eye.x * update.eye.x +
+                (update.eye.z - stance_z) * (update.eye.z - stance_z));
+            nearest = std::min(nearest, back);
+            furthest = std::max(furthest, back);
+        }
+        CHECK(furthest > nearest + 5.0F);
+        CHECK(furthest == Catch::Approx(round.rules().trace_distance).margin(1.0F));
+    }
+}
+
+TEST_CASE("a short shot skips the finish and the pull-back entirely") {
+    const Flat ground;
+    mgv::game::Round round{rules_with_hole_at({0.0F, -40.0F}), ground};
+    static_cast<void>(round.update(resting_at({0.0F, 0.02F, 0.0F})));
+
+    const auto struck = round.update(chipped_from({0.0F, 0.1F, 0.0F}));
+
+    // A chip is over before a camera could finish moving, and cutting away
+    // from the player to watch it would be worse than not cutting at all.
+    CHECK(struck.event == mgv::game::RoundEvent::ball_struck);
+    CHECK(struck.state == mgv::game::RoundState::in_flight);
+}
+
+TEST_CASE("a traced shot still ends in the walk to the ball") {
+    const Flat ground;
+    auto rules = rules_with_hole_at({0.0F, -300.0F});
+    rules.walk_duration = 1.0F;
+    mgv::game::Round round{rules, ground};
+    static_cast<void>(round.update(resting_at({0.0F, 0.02F, 0.0F})));
+    static_cast<void>(round.update(driven_from({0.0F, 0.1F, 0.0F})));
+
+    for (int step = 0; step < 300; ++step) {
+        static_cast<void>(round.update(driven_from({0.0F, 20.0F, -90.0F})));
+    }
+    REQUIRE(round.state() == mgv::game::RoundState::tracing);
+
+    const auto landed = round.update(resting_at({1.0F, 0.02F, -180.0F}));
+    CHECK(landed.event == mgv::game::RoundEvent::ball_came_to_rest);
+    CHECK(landed.state == mgv::game::RoundState::walking);
+}
+
+TEST_CASE("the player stands on the ground, not at their own eye height") {
+    // stance_for() answers in eye positions because that is what the camera
+    // wants; a character stood on one hovers a head above the turf.
+    const Flat ground;   // y = 0 everywhere
+    mgv::game::Round round{rules_with_hole_at({0.0F, -150.0F}), ground};
+
+    const auto addressing = round.update(resting_at({0.0F, 0.02F, 0.0F}));
+    CHECK(addressing.player_position.y == Catch::Approx(0.0F).margin(1.0e-4F));
+
+    SECTION("and keeps their feet down through the swing and the trace") {
+        auto update = round.update(driven_from({0.0F, 0.1F, 0.0F}));
+        for (int step = 0; step < 200; ++step) {
+            CHECK(update.player_position.y == Catch::Approx(0.0F).margin(1.0e-4F));
+            update = round.update(driven_from({0.0F, 20.0F, -70.0F}));
+        }
+    }
+    SECTION("the camera, which does want eye height, is still above them") {
+        CHECK(addressing.eye.y > addressing.player_position.y + 1.0F);
+    }
+}
+
+TEST_CASE("the pull-back eases its aim as well as its position") {
+    // A camera that keeps its position but snaps its aim to a ball already
+    // a hundred metres away has cut, not panned, and thrown the player out
+    // of frame on the way.
+    const Flat ground;
+    mgv::game::Round round{rules_with_hole_at({0.0F, -260.0F}), ground};
+    static_cast<void>(round.update(resting_at({0.0F, 0.02F, 0.0F})));
+    const auto struck = round.update(driven_from({0.0F, 0.1F, 0.0F}));
+    const auto watching = struck.look_at;
+
+    mgv::game::RoundUpdate first_trace{};
+    for (int step = 0; step < 300; ++step) {
+        const auto update = round.update(driven_from({0.0F, 25.0F, -120.0F}));
+        if (update.state == mgv::game::RoundState::tracing) {
+            first_trace = update;
+            break;
+        }
+    }
+    REQUIRE(first_trace.state == mgv::game::RoundState::tracing);
+
+    SECTION("the first traced frame still looks near the player") {
+        CHECK(first_trace.look_at.z == Catch::Approx(watching.z).margin(8.0F));
+    }
+    SECTION("and by the end it is looking at the ball itself") {
+        mgv::game::RoundUpdate settled{};
+        for (int step = 0; step < 300; ++step) {
+            settled = round.update(driven_from({0.0F, 25.0F, -120.0F}));
+        }
+        CHECK(settled.look_at.z == Catch::Approx(-120.0F).margin(0.5F));
+        CHECK(settled.look_at.y == Catch::Approx(25.0F).margin(0.5F));
     }
 }

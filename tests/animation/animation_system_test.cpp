@@ -92,3 +92,49 @@ TEST_CASE("animation rejects invalid assets, handles, and timing values") {
         animations.advance(mgv::animation::AnimationDuration{-0.1F}),
         std::invalid_argument);
 }
+
+TEST_CASE("a player can be switched to another clip on the same skeleton") {
+    const TestAnimationAssets assets;
+    mgv::animation::AnimationSystem system;
+    const auto first = system.load(assets.paths());
+    const auto second = system.load(assets.paths());
+    const auto player = system.create_player(first);
+
+    system.play(player);
+    system.advance(mgv::animation::AnimationDuration{0.4F});
+    REQUIRE(system.clip_of(player) == first);
+
+    system.set_clip(player, second);
+
+    SECTION("the player now reports the clip it was given") {
+        CHECK(system.clip_of(player) == second);
+    }
+    SECTION("and starts it from the beginning") {
+        // A swing that began halfway through would look like a twitch. A
+        // player freshly created on the same clip is by definition at the
+        // start, so after both have run for the same time they must agree.
+        // The comparison happens after an advance because a pose is sampled
+        // on the tick, not on the switch.
+        const auto reference = system.create_player(second);
+        system.play(reference);
+        system.advance(mgv::animation::AnimationDuration{0.1F});
+        CHECK(system.root_transform(player).position().x ==
+              Catch::Approx(system.root_transform(reference).position().x).margin(1.0e-3F));
+    }
+    SECTION("the binding that says which mesh it deforms survives") {
+        CHECK(system.contains(player));
+        CHECK(system.state(player) == mgv::animation::PlaybackState::playing);
+    }
+}
+
+TEST_CASE("switching to an unknown clip or player is an error") {
+    const TestAnimationAssets assets;
+    mgv::animation::AnimationSystem system;
+    const auto clip = system.load(assets.paths());
+    const auto player = system.create_player(clip);
+
+    CHECK_THROWS_AS(
+        system.set_clip(player, mgv::animation::AnimationClipId{9999}), std::out_of_range);
+    CHECK_THROWS_AS(
+        system.set_clip(mgv::animation::AnimationPlayerId{9999}, clip), std::out_of_range);
+}

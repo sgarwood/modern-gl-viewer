@@ -581,15 +581,27 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
     engine.set_camera(std::move(camera));
     engine.set_environment(description.environment);
 
+    std::optional<EntityId> character_entity;
+    std::optional<animation::AnimationPlayerId> character_player;
+    std::optional<animation::AnimationClipId> idle_clip;
+    std::optional<animation::AnimationClipId> follow_through_clip;
     if (character_index && character_skin && description.character) {
         const auto entity = entities[*character_index];
-        const auto clip = engine.load_animation({
+        idle_clip = engine.load_animation({
             .skeleton = description.character->skeleton,
             .animation = description.character->animation,
         });
-        const auto player = engine.bind_animation(entity, clip);
+        if (!description.character->follow_through.empty()) {
+            follow_through_clip = engine.load_animation({
+                .skeleton = description.character->skeleton,
+                .animation = description.character->follow_through,
+            });
+        }
+        const auto player = engine.bind_animation(entity, *idle_clip);
         engine.bind_skin(entity, player, *character_skin);
         engine.enqueue(PlayAnimationCommand{player});
+        character_player = player;
+        character_entity = entity;
     }
 
     auto rules = description.round;
@@ -603,8 +615,18 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
         .grass = grass_index ? std::optional<EntityId>{entities[*grass_index]} : std::nullopt,
         .terrain_centre = snapped_terrain_centre(tessellation),
         .grass_centre = grass_field.centre,
+        .character = character_entity,
+        .character_z_up = description.character && description.character->z_up,
+        .character_scale = description.character ? description.character->scale : 1.0F,
+        .character_player = character_player,
+        .idle_clip = idle_clip,
+        .follow_through_clip = follow_through_clip,
         .round = std::make_shared<CourseRound>(description.terrain, rules),
     };
+}
+
+game::RoundState round_state(const CourseSession& session) {
+    return session.round ? session.round->round.state() : game::RoundState::addressing;
 }
 
 game::RoundEvent advance_round(
@@ -616,18 +638,43 @@ game::RoundEvent advance_round(
     }
     const auto lie = engine.transform(session.ball).position();
     const auto velocity = engine.linear_velocity(session.ball);
-    const auto speed = velocity
-        ? std::sqrt(
-              velocity->metres_per_second().x * velocity->metres_per_second().x +
-              velocity->metres_per_second().y * velocity->metres_per_second().y +
-              velocity->metres_per_second().z * velocity->metres_per_second().z)
-        : 0.0F;
 
     const auto update = session.round->round.update({
         .elapsed_seconds = engine.last_tick_seconds(),
         .ball_position = lie,
-        .ball_speed = speed,
+        .ball_velocity = velocity ? velocity->metres_per_second() : Vec3{},
     });
+
+    // A shot worth watching gets a swing to watch. The round decides that a
+    // shot is long; which clip that corresponds to is the session's business,
+    // since the round knows nothing of animation.
+    if (update.event == game::RoundEvent::long_shot_struck &&
+        session.character_player && session.follow_through_clip) {
+        engine.play_clip(*session.character_player, *session.follow_through_clip);
+    } else if (update.event == game::RoundEvent::ball_came_to_rest &&
+               session.character_player && session.idle_clip) {
+        // Back to idle when the ball lands rather than when the player
+        // reaches it, or they walk the length of the fairway still frozen
+        // in their finish.
+        engine.play_clip(*session.character_player, *session.idle_clip);
+    }
+
+    // Stand the character where the round says the player is. Without this
+    // the swing being watched and the swing being simulated happen in two
+    // different places.
+    if (session.character) {
+        constexpr float degrees_to_radians = 3.14159265F / 180.0F;
+        const auto facing = Quaternion::from_axis_angle(
+            {0.0F, 1.0F, 0.0F}, update.player_facing_degrees * degrees_to_radians);
+        const auto upright = session.character_z_up
+            ? Quaternion::from_axis_angle({1.0F, 0.0F, 0.0F}, -90.0F * degrees_to_radians)
+            : Quaternion{};
+        Transform placement;
+        placement.set_position(update.player_position)
+            .set_rotation(facing * upright)
+            .set_uniform_scale(session.character_scale);
+        engine.enqueue(SetEntityTransformCommand{*session.character, placement});
+    }
 
     if (update.directs_camera) {
         auto camera = engine.camera();
@@ -661,7 +708,7 @@ game::RoundEvent toggle_range_finder(Engine& engine, const CourseSession& sessio
     }
     const auto lie = engine.transform(session.ball).position();
     return session.round->round.toggle_range_finder(
-        {.elapsed_seconds = engine.last_tick_seconds(), .ball_position = lie, .ball_speed = 0.0F});
+        {.elapsed_seconds = engine.last_tick_seconds(), .ball_position = lie, .ball_velocity = {}});
 }
 
 std::optional<float> range_find(Engine& engine, const CourseSession& session) {

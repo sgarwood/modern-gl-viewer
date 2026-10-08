@@ -279,6 +279,18 @@ Transform AnimationSystem::root_transform(AnimationPlayerId player) const {
     return impl_->find(player).root;
 }
 
+void AnimationSystem::set_clip(AnimationPlayerId player, AnimationClipId clip) {
+    auto& found = impl_->find(player);
+    const auto& wanted = impl_->find(clip);
+    const auto& current = impl_->find(found.clip);
+    if (wanted.skeleton.num_joints() != current.skeleton.num_joints()) {
+        throw std::invalid_argument{
+            "Cannot play a clip built on a skeleton of a different size"};
+    }
+    found.clip = clip;
+    found.time = 0.0F;
+}
+
 AnimationClipId AnimationSystem::clip_of(AnimationPlayerId player) const {
     return impl_->find(player).clip;
 }
