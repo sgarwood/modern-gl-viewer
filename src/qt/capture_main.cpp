@@ -160,6 +160,14 @@ int main(int argc, char** argv) {
         "character-z-up", "Stand a Z-up asset upright."};
     const QCommandLineOption follow_through_option{
         "follow-through", "Clip the character plays when a long shot is struck.", "ozz"};
+    const QCommandLineOption club_option{
+        "club", "Binary STL club held in the lead hand.", "stl"};
+    const QCommandLineOption grip_option{
+        "grip",
+        "How the club sits in the hand: \"x,y,z,pitch,yaw,roll,scale\".",
+        "spec"};
+    const QCommandLineOption grip_joint_option{
+        "grip-joint", "Joint the club is gripped by.", "name"};
     const QCommandLineOption trace_option{
         "trace", "Print the round state and camera as the sequence runs."};
     const QCommandLineOption rate_option{
@@ -205,6 +213,9 @@ int main(int argc, char** argv) {
                                frame_dir_option,
                                rate_option,
                                trace_option,
+                               club_option,
+                               grip_option,
+                               grip_joint_option,
                                camera_option,
                                target_option,
                                fov_option,
@@ -322,6 +333,24 @@ int main(int argc, char** argv) {
             character.animation = path_from(parts[2].trimmed());
             if (parser.isSet(follow_through_option)) {
                 character.follow_through = path_from(parser.value(follow_through_option));
+            }
+            if (parser.isSet(club_option)) {
+                mgv::CourseClub club;
+                club.model = path_from(parser.value(club_option));
+                if (parser.isSet(grip_joint_option)) {
+                    club.grip_joint = parser.value(grip_joint_option).toStdString();
+                }
+                if (parser.isSet(grip_option)) {
+                    const auto grip = parser.value(grip_option).split(QChar{','});
+                    if (grip.size() >= 7) {
+                        club.grip_offset = {grip[0].toFloat(), grip[1].toFloat(),
+                                            grip[2].toFloat()};
+                        club.grip_rotation_degrees = {grip[3].toFloat(), grip[4].toFloat(),
+                                                      grip[5].toFloat()};
+                        club.scale = grip[6].toFloat();
+                    }
+                }
+                character.club = club;
             }
             if (parser.isSet(character_at_option)) {
                 const auto at = parse_vec3(parser.value(character_at_option));

@@ -86,6 +86,7 @@ add_library(mgv_core
     src/lighting.cpp
     src/material.cpp
     src/obj_loader.cpp
+    src/stl_loader.cpp
     src/primitives.cpp
     src/renderer.cpp
     src/runtime_paths.cpp
@@ -433,6 +434,7 @@ if(BUILD_TESTING)
         tests/renderer_test.cpp
         tests/runtime_paths_test.cpp
         tests/scene_test.cpp
+        tests/stl_loader_test.cpp
         tests/shader_loader_test.cpp
         tests/texture_test.cpp
         tests/transform_test.cpp

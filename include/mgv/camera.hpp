@@ -17,6 +17,10 @@ inline constexpr Mat4 identity_matrix{
     0.0F, 0.0F, 0.0F, 1.0F,
 };
 
+/// Matrix product in the column-major layout above: `multiply(a, b)` applies
+/// `b` first, matching how the transforms they stand for compose.
+[[nodiscard]] Mat4 multiply(const Mat4& lhs, const Mat4& rhs) noexcept;
+
 class Camera final {
 public:
     Camera() = default;

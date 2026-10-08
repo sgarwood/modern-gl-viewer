@@ -46,6 +46,62 @@ Quaternion operator*(const Quaternion& lhs, const Quaternion& rhs) noexcept {
     };
 }
 
+Transform Transform::from_matrix(const Mat4& matrix) {
+    Transform result;
+    result.set_position({matrix[12], matrix[13], matrix[14]});
+
+    // Column lengths are the scale. A joint matrix is rigid, so these come
+    // back as one, but a socket may well have been scaled on the way in.
+    const auto column_length = [&matrix](std::size_t column) {
+        const auto x = matrix[column * 4 + 0];
+        const auto y = matrix[column * 4 + 1];
+        const auto z = matrix[column * 4 + 2];
+        return std::sqrt(x * x + y * y + z * z);
+    };
+    const Vec3 scale{column_length(0), column_length(1), column_length(2)};
+    result.set_scale(scale);
+    if (scale.x <= 1.0e-12F || scale.y <= 1.0e-12F || scale.z <= 1.0e-12F) {
+        return result;   // degenerate; the rotation is meaningless
+    }
+
+    const auto at = [&matrix, &scale](std::size_t column, std::size_t row) {
+        const auto divisor = column == 0 ? scale.x : (column == 1 ? scale.y : scale.z);
+        return matrix[column * 4 + row] / divisor;
+    };
+
+    // Build the quaternion from whichever component is largest. Solving for
+    // w first and dividing by it collapses at a half turn, where w is zero.
+    const auto trace = at(0, 0) + at(1, 1) + at(2, 2);
+    Quaternion rotation;
+    if (trace > 0.0F) {
+        const auto root = std::sqrt(trace + 1.0F) * 2.0F;
+        rotation.w = 0.25F * root;
+        rotation.x = (at(1, 2) - at(2, 1)) / root;
+        rotation.y = (at(2, 0) - at(0, 2)) / root;
+        rotation.z = (at(0, 1) - at(1, 0)) / root;
+    } else if (at(0, 0) > at(1, 1) && at(0, 0) > at(2, 2)) {
+        const auto root = std::sqrt(1.0F + at(0, 0) - at(1, 1) - at(2, 2)) * 2.0F;
+        rotation.w = (at(1, 2) - at(2, 1)) / root;
+        rotation.x = 0.25F * root;
+        rotation.y = (at(1, 0) + at(0, 1)) / root;
+        rotation.z = (at(2, 0) + at(0, 2)) / root;
+    } else if (at(1, 1) > at(2, 2)) {
+        const auto root = std::sqrt(1.0F + at(1, 1) - at(0, 0) - at(2, 2)) * 2.0F;
+        rotation.w = (at(2, 0) - at(0, 2)) / root;
+        rotation.x = (at(1, 0) + at(0, 1)) / root;
+        rotation.y = 0.25F * root;
+        rotation.z = (at(2, 1) + at(1, 2)) / root;
+    } else {
+        const auto root = std::sqrt(1.0F + at(2, 2) - at(0, 0) - at(1, 1)) * 2.0F;
+        rotation.w = (at(0, 1) - at(1, 0)) / root;
+        rotation.x = (at(2, 0) + at(0, 2)) / root;
+        rotation.y = (at(2, 1) + at(1, 2)) / root;
+        rotation.z = 0.25F * root;
+    }
+    result.set_rotation(rotation);
+    return result;
+}
+
 Transform& Transform::set_position(Vec3 value) noexcept {
     position_ = value;
     return *this;

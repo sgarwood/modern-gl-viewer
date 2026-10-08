@@ -15,18 +15,6 @@
 namespace mgv {
 namespace {
 
-[[nodiscard]] Mat4 multiply(const Mat4& lhs, const Mat4& rhs) {
-    Mat4 result{};
-    for (std::size_t column = 0; column < 4; ++column) {
-        for (std::size_t row = 0; row < 4; ++row) {
-            for (std::size_t inner = 0; inner < 4; ++inner) {
-                result[column * 4 + row] += lhs[inner * 4 + row] * rhs[column * 4 + inner];
-            }
-        }
-    }
-    return result;
-}
-
 /// Returns the inverse transpose of the upper-left 3x3 block of `model`, so
 /// normals survive non-uniform scale. Translation is dropped and a singular
 /// basis degrades to the identity rather than producing infinities.

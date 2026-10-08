@@ -20,18 +20,6 @@ namespace mgv {
 
 namespace {
 
-[[nodiscard]] Mat4 multiply(const Mat4& lhs, const Mat4& rhs) {
-    Mat4 result{};
-    for (std::size_t column = 0; column < 4; ++column) {
-        for (std::size_t row = 0; row < 4; ++row) {
-            for (std::size_t inner = 0; inner < 4; ++inner) {
-                result[column * 4 + row] += lhs[inner * 4 + row] * rhs[column * 4 + inner];
-            }
-        }
-    }
-    return result;
-}
-
 class SteadyClock final : public Clock {
 public:
     [[nodiscard]] time_point now() const noexcept override {
@@ -554,6 +542,29 @@ void Engine::play_clip(
     animation::AnimationClipId clip) {
     impl_->animation_system.set_clip(player, clip);
     impl_->animation_system.play(player);
+}
+
+std::vector<std::string> Engine::joint_names(animation::AnimationClipId clip) const {
+    return impl_->animation_system.joint_names(clip);
+}
+
+std::optional<Transform> Engine::joint_transform(
+    animation::AnimationPlayerId player,
+    std::string_view joint) const {
+    auto& animation = impl_->animation_system;
+    const auto clip = animation.clip_of(player);
+    const auto names = animation.joint_names(clip);
+    const auto found = std::ranges::find(names, joint);
+    if (found == names.end()) {
+        return std::nullopt;
+    }
+    std::vector<Mat4> matrices(animation.joint_count(clip));
+    const auto written = animation.joint_matrices(player, matrices);
+    const auto index = static_cast<std::size_t>(std::distance(names.begin(), found));
+    if (index >= written) {
+        return std::nullopt;
+    }
+    return Transform::from_matrix(matrices[index]);
 }
 
 void Engine::enqueue(EngineCommand command) {

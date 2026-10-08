@@ -474,3 +474,37 @@ TEST_CASE("engine accepts only static bodies as unrendered world colliders") {
             .build()),
         std::invalid_argument);
 }
+
+TEST_CASE("a joint can be read as a transform, which is how a prop is socketed") {
+    const TestAnimationAssets assets;
+    RenderProbe probe;
+    auto clock = std::make_unique<FakeClock>();
+    auto* clock_view = clock.get();
+    mgv::Engine engine{std::make_unique<FakeBackend>(probe), std::move(clock)};
+    const auto entity = engine.set_scene(triangle_scene()).front();
+    const auto clip = engine.load_animation(assets.paths());
+    const auto player = engine.bind_animation(entity, clip);
+    const auto names = engine.joint_names(clip);
+    REQUIRE_FALSE(names.empty());
+
+    SECTION("an unknown joint is empty rather than an error") {
+        // Swapping in a differently rigged asset is ordinary, not a fault.
+        CHECK_FALSE(engine.joint_transform(player, "no-such-joint").has_value());
+    }
+
+    SECTION("a known joint follows the animation") {
+        engine.enqueue(mgv::PlayAnimationCommand{player});
+        engine.tick({800, 600});
+        const auto before = engine.joint_transform(player, names.front());
+        REQUIRE(before.has_value());
+
+        clock_view->advance(std::chrono::duration<float>{0.25F});
+        engine.tick({800, 600});
+        const auto after = engine.joint_transform(player, names.front());
+        REQUIRE(after.has_value());
+
+        // A socket that did not move with the clip would leave a club
+        // hanging in the air while the hand swung away from it.
+        CHECK(after->position().x != Catch::Approx(before->position().x).margin(1.0e-4F));
+    }
+}

@@ -35,7 +35,9 @@ namespace {
     return {value.x / magnitude, value.y / magnitude, value.z / magnitude};
 }
 
-[[nodiscard]] Mat4 multiply(const Mat4& lhs, const Mat4& rhs) {
+} // namespace
+
+Mat4 multiply(const Mat4& lhs, const Mat4& rhs) noexcept {
     Mat4 result{};
     for (std::size_t column = 0; column < 4; ++column) {
         for (std::size_t row = 0; row < 4; ++row) {
@@ -46,8 +48,6 @@ namespace {
     }
     return result;
 }
-
-} // namespace
 
 void Camera::look_at(Vec3 position, Vec3 target, Vec3 up) {
     const auto forward = normalized(subtract(target, position), "Camera position and target must differ");

@@ -21,6 +21,17 @@ struct Quaternion final {
 
 class Transform final {
 public:
+    /// Recovers a transform from a matrix built of a rotation, a uniform
+    /// scale and a translation.
+    ///
+    /// Anything socketed to a skeleton arrives as a matrix, because that is
+    /// what a joint palette is made of, and the scene wants position,
+    /// rotation and scale. The decomposition assumes the matrix really is
+    /// rigid-plus-uniform-scale: a joint matrix from an animation is, but a
+    /// matrix carrying shear or non-uniform scale will not survive the
+    /// round trip, and nothing here will tell you so.
+    [[nodiscard]] static Transform from_matrix(const Mat4& matrix);
+
     Transform& set_position(Vec3 value) noexcept;
     Transform& set_rotation(Quaternion value);
     Transform& set_scale(Vec3 value) noexcept;

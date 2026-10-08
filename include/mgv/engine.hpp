@@ -198,6 +198,23 @@ public:
     /// ball was struck, not on the next one.
     void play_clip(animation::AnimationPlayerId player, animation::AnimationClipId clip);
 
+    /// The clip's joint names, in skeleton order. What a socket can name.
+    [[nodiscard]] std::vector<std::string> joint_names(
+        animation::AnimationClipId clip) const;
+
+    /// Where a named joint currently is, in the skeleton's own space.
+    ///
+    /// This is what a prop is socketed to: multiply it by whatever world
+    /// transform the character is drawn with and a club ends up in a hand
+    /// and stays there, because the hand and the club are now reading the
+    /// same animation rather than two copies of it.
+    ///
+    /// Empty if the skeleton has no joint of that name, which is the
+    /// ordinary case when an asset is swapped for one rigged differently.
+    [[nodiscard]] std::optional<Transform> joint_transform(
+        animation::AnimationPlayerId player,
+        std::string_view joint) const;
+
     void enqueue(EngineCommand command);
     void enqueue(InputAction action);
     void submit_shot(golf::Shot shot);

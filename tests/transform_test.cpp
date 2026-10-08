@@ -68,3 +68,48 @@ TEST_CASE("quaternion composition applies the right-hand rotation first") {
         CHECK(same.matrix() == stepwise_yaw.matrix());
     }
 }
+
+TEST_CASE("a transform can be recovered from its own matrix") {
+    mgv::Transform original;
+    original.set_position({3.0F, -2.0F, 7.5F})
+        .set_rotation(mgv::Quaternion::from_axis_angle({0.0F, 1.0F, 0.0F}, 1.1F) *
+                      mgv::Quaternion::from_axis_angle({1.0F, 0.0F, 0.0F}, -0.4F))
+        .set_uniform_scale(0.25F);
+
+    const auto recovered = mgv::Transform::from_matrix(original.matrix());
+
+    SECTION("the position comes back exactly") {
+        CHECK(recovered.position().x == Catch::Approx(3.0F));
+        CHECK(recovered.position().y == Catch::Approx(-2.0F));
+        CHECK(recovered.position().z == Catch::Approx(7.5F));
+    }
+    SECTION("the scale comes back") {
+        CHECK(recovered.scale().x == Catch::Approx(0.25F).margin(1.0e-5F));
+    }
+    SECTION("and the rotation round-trips through its matrix") {
+        // Quaternions double-cover rotations, so q and -q are the same
+        // turn; comparing the matrices avoids calling that a failure.
+        const auto before = original.matrix();
+        const auto after = recovered.matrix();
+        for (std::size_t element = 0; element < before.size(); ++element) {
+            CHECK(after[element] == Catch::Approx(before[element]).margin(1.0e-5F));
+        }
+    }
+}
+
+TEST_CASE("decomposition survives rotations near a half turn") {
+    // The naive w-first reconstruction divides by something that goes to
+    // zero at 180 degrees, which is exactly where a club pointing backwards
+    // would put it.
+    for (const float radians : {3.14159F, 3.0F, -3.1F, 1.5707963F}) {
+        mgv::Transform original;
+        original.set_rotation(
+            mgv::Quaternion::from_axis_angle({0.0F, 0.0F, 1.0F}, radians));
+        const auto recovered = mgv::Transform::from_matrix(original.matrix());
+        const auto before = original.matrix();
+        const auto after = recovered.matrix();
+        for (std::size_t element = 0; element < before.size(); ++element) {
+            CHECK(after[element] == Catch::Approx(before[element]).margin(1.0e-4F));
+        }
+    }
+}

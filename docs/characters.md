@@ -169,6 +169,32 @@ slowly. For a swing proper, retarget motion capture -- see the CMU database
 above -- and keep this for the static poses a round needs: addressing,
 crouching at the cup, standing at the range finder.
 
+## Socketing a club
+
+A prop held in a hand reads the same animation the hand does, rather than a
+copy of it. `Engine::joint_transform(player, name)` gives a named joint's
+current place in the skeleton's own space; multiply it by whatever world
+transform the character is drawn with and the club stays in the hand for
+free. `Engine::joint_names(clip)` says what there is to socket to -- an
+unknown name comes back empty rather than throwing, because swapping in a
+differently rigged asset is ordinary rather than a fault.
+
+`assets/golf_club.stl` is read by `load_binary_stl`. STL is what CAD and
+sculpting tools export when asked for something simple: triangles and a
+face normal each, no indices, no texture coordinates, no materials. It
+carries less than the OBJ and glTF importers expect, which is why it is
+read separately rather than folded into either. Because it duplicates every
+corner, a mesh read literally is faceted; the loader welds corners and
+averages their normals, keeping any edge sharper than a crease angle, which
+is what stops a club face melting into its sole.
+
+`CourseClub` says which joint holds it and how it sits there. The offset is
+in the club's own units and is applied **before** the club is turned and
+scaled, so it can be read straight off the model -- "put z = 3 in the hand"
+-- instead of being a post-rotation nudge that has to be re-derived every
+time the rotation changes. The committed defaults suit this asset: shaft
+along +Z, head at -Z, origin mid-shaft.
+
 ## Suggested order
 
 Do **3** first, on its own. It is small, it is self-contained, and it lets a

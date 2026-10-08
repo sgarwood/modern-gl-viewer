@@ -11,6 +11,7 @@
 #include <span>
 #include <vector>
 #include "mgv/primitives.hpp"
+#include "mgv/stl_loader.hpp"
 #include "mgv/shader_loader.hpp"
 
 #include <cmath>
@@ -452,6 +453,7 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
 
     // --- a character ---------------------------------------------------------
     std::optional<std::size_t> character_index;
+    std::optional<std::size_t> club_index;
     std::optional<ImportedSkin> character_skin;
     if (description.character) {
         const auto& wanted = *description.character;
@@ -505,6 +507,18 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
                       *imported.materials.front().diffuse_image,
                       imported.materials.front().sampler)
                 : white_texture());
+
+        if (description.character->club) {
+            const auto& club = *description.character->club;
+            // Steel: dark enough to read against the turf, smooth enough to
+            // catch the sun along the shaft.
+            club_index = scene.size();
+            scene.add(Renderable{
+                std::make_shared<const MeshData>(load_binary_stl(club.model)),
+                painted(prop_material, {0.42F, 0.44F, 0.47F, 0.22F}),
+                Transform{},
+            });
+        }
 
         character_index = scene.size();
         character_skin = imported.skin;
@@ -618,6 +632,9 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
         .character = character_entity,
         .character_z_up = description.character && description.character->z_up,
         .character_scale = description.character ? description.character->scale : 1.0F,
+        .club_entity = club_index ? std::optional<EntityId>{entities[*club_index]}
+                                  : std::nullopt,
+        .club = description.character ? description.character->club : std::nullopt,
         .character_player = character_player,
         .idle_clip = idle_clip,
         .follow_through_clip = follow_through_clip,
@@ -674,6 +691,39 @@ game::RoundEvent advance_round(
             .set_rotation(facing * upright)
             .set_uniform_scale(session.character_scale);
         engine.enqueue(SetEntityTransformCommand{*session.character, placement});
+    }
+
+    // Socket the club to the hand. The joint transform is read after the
+    // character's own placement is decided, so the two agree on the frame
+    // rather than the club trailing the hand by one.
+    if (session.club_entity && session.club && session.character_player &&
+        session.character) {
+        const auto& club = *session.club;
+        if (const auto joint =
+                engine.joint_transform(*session.character_player, club.grip_joint)) {
+            constexpr float degrees_to_radians = 3.14159265F / 180.0F;
+            // The offset is in the club's own units and is applied before
+            // the club is turned and scaled, so it can be read off the
+            // model -- "put z = 3 in the hand" -- rather than being a
+            // post-rotation nudge that has to be re-derived every time the
+            // rotation changes.
+            Transform shift;
+            shift.set_position(club.grip_offset);
+            Transform placement;
+            placement.set_rotation(
+                    Quaternion::from_axis_angle(
+                        {0.0F, 1.0F, 0.0F}, club.grip_rotation_degrees.y * degrees_to_radians) *
+                    Quaternion::from_axis_angle(
+                        {1.0F, 0.0F, 0.0F}, club.grip_rotation_degrees.x * degrees_to_radians) *
+                    Quaternion::from_axis_angle(
+                        {0.0F, 0.0F, 1.0F}, club.grip_rotation_degrees.z * degrees_to_radians))
+                .set_uniform_scale(club.scale);
+            const auto grip = multiply(placement.matrix(), shift.matrix());
+            const auto world = multiply(
+                multiply(engine.transform(*session.character).matrix(), joint->matrix()), grip);
+            engine.enqueue(
+                SetEntityTransformCommand{*session.club_entity, Transform::from_matrix(world)});
+        }
     }
 
     if (update.directs_camera) {

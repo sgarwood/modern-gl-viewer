@@ -45,6 +45,29 @@ struct CourseViewpoint final {
 /// All three parts are needed: the rigged mesh, and the skeleton and clip it
 /// is driven by. The skeleton and clip are converted separately -- by
 /// `gltf2ozz` -- which is exactly why the skin binds to them by joint name.
+/// A prop held in a character's hand.
+struct CourseClub final {
+    /// Binary STL. A club comes out of CAD or a sculpting tool, which is
+    /// what STL is for; it carries no materials, so the session gives it
+    /// one.
+    std::filesystem::path model;
+    /// The joint it is gripped by, by name. The lead hand, for a club: the
+    /// trail hand follows it rather than the other way round.
+    std::string grip_joint{"Skeleton_arm_joint_L__2_"};
+    /// Metres per model unit.
+    float scale{0.16F};
+    /// Which point of the club lands in the hand, in the club's own units
+    /// and applied before it is turned and scaled, and how it is then
+    /// turned to lie in the grip. Authored against the asset, since no two
+    /// exporters agree on which way a club points.
+    /// Defaults authored against assets/golf_club.stl, whose shaft runs
+    /// along +Z with the head at -Z and whose origin sits mid-shaft: put
+    /// z = 3 in the hand and lay the club back over the trail shoulder,
+    /// which is where a finish leaves it.
+    Vec3 grip_offset{0.0F, 0.0F, -3.0F};
+    Vec3 grip_rotation_degrees{-175.0F, 0.0F, 0.0F};
+};
+
 struct CourseCharacter final {
     std::filesystem::path model;
     std::filesystem::path skeleton;
@@ -59,6 +82,8 @@ struct CourseCharacter final {
     float facing_degrees{};
     /// Uniform scale. Characters are rarely authored in metres.
     float scale{1.0F};
+    /// The club they are holding, if any.
+    std::optional<CourseClub> club{};
     /// Whether the asset was authored Z-up and needs standing upright.
     ///
     /// glTF declares Y-up, but exports that began life in a Z-up tool
@@ -147,6 +172,9 @@ struct CourseSession final {
     std::optional<EntityId> character{};
     bool character_z_up{};
     float character_scale{1.0F};
+    /// The club entity and how it is socketed, if the session placed one.
+    std::optional<EntityId> club_entity{};
+    std::optional<CourseClub> club{};
     /// The character's animation player, if the session placed one.
     std::optional<animation::AnimationPlayerId> character_player{};
     /// Its idle and follow-through clips.
