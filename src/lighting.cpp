@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <numbers>
+#include <stdexcept>
 
 namespace mgv {
 namespace {
@@ -53,6 +54,54 @@ namespace {
         return {0.0F, 1.0F, 0.0F};
     }
     return {value.x / magnitude, value.y / magnitude, value.z / magnitude};
+}
+
+[[nodiscard]] Vec3 add(const Vec3& lhs, const Vec3& rhs) noexcept {
+    return {lhs.x + rhs.x, lhs.y + rhs.y, lhs.z + rhs.z};
+}
+
+[[nodiscard]] Vec3 subtract(const Vec3& lhs, const Vec3& rhs) noexcept {
+    return {lhs.x - rhs.x, lhs.y - rhs.y, lhs.z - rhs.z};
+}
+
+[[nodiscard]] Vec3 scaled(const Vec3& value, float scale) noexcept {
+    return {value.x * scale, value.y * scale, value.z * scale};
+}
+
+[[nodiscard]] float length(const Vec3& value) noexcept {
+    return std::sqrt(dot(value, value));
+}
+
+[[nodiscard]] std::array<Vec3, 8> frustum_slice_corners(
+    const Camera& camera,
+    float aspect_ratio,
+    float near_distance,
+    float far_distance) {
+    const auto forward = normalized(subtract(camera.target(), camera.position()));
+    const auto right = normalized(cross(forward, camera.up()));
+    const auto up = cross(right, forward);
+    const auto half_fov = camera.vertical_field_of_view_degrees() *
+                          std::numbers::pi_v<float> / 360.0F;
+    const auto tangent = std::tan(half_fov);
+    const auto near_height = tangent * near_distance;
+    const auto near_width = near_height * aspect_ratio;
+    const auto far_height = tangent * far_distance;
+    const auto far_width = far_height * aspect_ratio;
+    const auto near_center = add(camera.position(), scaled(forward, near_distance));
+    const auto far_center = add(camera.position(), scaled(forward, far_distance));
+    const auto corner = [&](Vec3 center, float width, float height, float x, float y) {
+        return add(add(center, scaled(right, width * x)), scaled(up, height * y));
+    };
+    return {
+        corner(near_center, near_width, near_height, -1.0F, -1.0F),
+        corner(near_center, near_width, near_height, 1.0F, -1.0F),
+        corner(near_center, near_width, near_height, 1.0F, 1.0F),
+        corner(near_center, near_width, near_height, -1.0F, 1.0F),
+        corner(far_center, far_width, far_height, -1.0F, -1.0F),
+        corner(far_center, far_width, far_height, 1.0F, -1.0F),
+        corner(far_center, far_width, far_height, 1.0F, 1.0F),
+        corner(far_center, far_width, far_height, -1.0F, 1.0F),
+    };
 }
 
 } // namespace
@@ -123,6 +172,66 @@ Mat4 directional_light_view_projection(
         }
     }
     return result;
+}
+
+std::vector<ShadowCascade> directional_light_cascades(
+    const Camera& camera,
+    float aspect_ratio,
+    Vec3 light_direction,
+    const ShadowVolume& settings,
+    ClipSpaceConvention convention) {
+    if (!std::isfinite(aspect_ratio) || aspect_ratio <= 0.0F ||
+        settings.cascade_count == 0 || settings.cascade_count > maximum_shadow_cascades ||
+        !std::isfinite(settings.maximum_distance) ||
+        settings.maximum_distance <= camera.near_plane() ||
+        !std::isfinite(settings.split_lambda) || settings.split_lambda < 0.0F ||
+        settings.split_lambda > 1.0F || settings.resolution <= 0 ||
+        !std::isfinite(settings.caster_distance) || settings.caster_distance <= 0.0F) {
+        throw std::invalid_argument{"Invalid directional shadow cascade settings"};
+    }
+
+    const auto near_distance = camera.near_plane();
+    const auto far_distance = std::min(camera.far_plane(), settings.maximum_distance);
+    std::vector<ShadowCascade> cascades;
+    cascades.reserve(settings.cascade_count);
+    auto previous_split = near_distance;
+    for (std::uint32_t index = 0; index < settings.cascade_count; ++index) {
+        const auto ratio = static_cast<float>(index + 1U) /
+                           static_cast<float>(settings.cascade_count);
+        const auto logarithmic = near_distance *
+                                 std::pow(far_distance / near_distance, ratio);
+        const auto uniform = near_distance + (far_distance - near_distance) * ratio;
+        auto split = settings.split_lambda * logarithmic +
+                     (1.0F - settings.split_lambda) * uniform;
+        if (index + 1U == settings.cascade_count) {
+            split = far_distance;
+        }
+
+        const auto corners = frustum_slice_corners(
+            camera, aspect_ratio, previous_split, split);
+        Vec3 centre{};
+        for (const auto& corner : corners) {
+            centre = add(centre, corner);
+        }
+        centre = scaled(centre, 1.0F / static_cast<float>(corners.size()));
+        auto radius = 0.0F;
+        for (const auto& corner : corners) {
+            radius = std::max(radius, length(subtract(corner, centre)));
+        }
+        // Quantizing the extent avoids tiny floating-point changes resizing
+        // the texel grid as the camera moves.
+        radius = std::ceil(radius * 16.0F) / 16.0F;
+        auto volume = settings;
+        volume.centre = centre;
+        volume.radius = radius;
+        cascades.push_back({
+            .view_projection = directional_light_view_projection(
+                light_direction, volume, convention),
+            .split_depth = split,
+        });
+        previous_split = split;
+    }
+    return cascades;
 }
 
 } // namespace mgv

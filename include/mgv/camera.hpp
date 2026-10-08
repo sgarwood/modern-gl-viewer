@@ -18,6 +18,10 @@ public:
 
     [[nodiscard]] const Vec3& position() const noexcept;
     [[nodiscard]] const Vec3& target() const noexcept;
+    [[nodiscard]] const Vec3& up() const noexcept;
+    [[nodiscard]] float vertical_field_of_view_degrees() const noexcept;
+    [[nodiscard]] float near_plane() const noexcept;
+    [[nodiscard]] float far_plane() const noexcept;
     [[nodiscard]] Mat4 view_matrix() const;
     [[nodiscard]] Mat4 projection_matrix(
         float aspect_ratio,

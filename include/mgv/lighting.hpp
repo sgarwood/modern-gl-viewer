@@ -4,7 +4,12 @@
 #include "mgv/clip_space.hpp"
 #include "mgv/mesh.hpp"
 
+#include <cstdint>
+#include <vector>
+
 namespace mgv {
+
+inline constexpr std::uint32_t maximum_shadow_cascades = 4;
 
 /// A single directional light, expressed in linear radiometric units.
 ///
@@ -56,6 +61,19 @@ struct ShadowVolume final {
     /// Size of the shadow map in texels, used to snap the volume so that it
     /// does not shimmer as the camera moves.
     int resolution{2048};
+    /// Camera-fitted depth slices used by the renderer.
+    std::uint32_t cascade_count{3};
+    /// Furthest camera-space distance that receives directional shadows.
+    float maximum_distance{160.0F};
+    /// Blend between uniform (0) and logarithmic (1) split placement.
+    float split_lambda{0.7F};
+};
+
+struct ShadowCascade final {
+    Mat4 view_projection{};
+    float split_depth{};
+
+    friend bool operator==(const ShadowCascade&, const ShadowCascade&) = default;
 };
 
 /// Builds the view-projection matrix a directional light renders its shadow
@@ -67,6 +85,16 @@ struct ShadowVolume final {
 [[nodiscard]] Mat4 directional_light_view_projection(
     Vec3 light_direction,
     const ShadowVolume& volume,
+    ClipSpaceConvention convention = {});
+
+/// Fits stable directional-light volumes to ordered slices of the camera
+/// frustum. The input volume supplies cascade policy, resolution, and caster
+/// distance; each result derives its own centre and radius from the camera.
+[[nodiscard]] std::vector<ShadowCascade> directional_light_cascades(
+    const Camera& camera,
+    float aspect_ratio,
+    Vec3 light_direction,
+    const ShadowVolume& settings,
     ClipSpaceConvention convention = {});
 
 /// Builds a sun direction from compass bearing and elevation, both in degrees.

@@ -71,6 +71,12 @@ void Camera::set_perspective(float vertical_field_of_view_degrees, float near_pl
 
 const Vec3& Camera::position() const noexcept { return position_; }
 const Vec3& Camera::target() const noexcept { return target_; }
+const Vec3& Camera::up() const noexcept { return up_; }
+float Camera::vertical_field_of_view_degrees() const noexcept {
+    return vertical_field_of_view_degrees_;
+}
+float Camera::near_plane() const noexcept { return near_plane_; }
+float Camera::far_plane() const noexcept { return far_plane_; }
 
 Mat4 Camera::view_matrix() const {
     const auto forward = normalized(subtract(target_, position_), "Camera position and target must differ");
