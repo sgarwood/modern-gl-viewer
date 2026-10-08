@@ -181,3 +181,58 @@ TEST_CASE("the shadow volume reaches above its own ground plane") {
         CHECK(clip.z <= 1.0F);
     }
 }
+
+TEST_CASE("directional shadow cascades fit ordered slices of the camera frustum") {
+    mgv::Camera camera;
+    camera.look_at({8.0F, 6.0F, 12.0F}, {0.0F, 0.5F, -20.0F});
+    camera.set_perspective(50.0F, 0.1F, 300.0F);
+    mgv::ShadowVolume settings;
+    settings.cascade_count = 3;
+    settings.maximum_distance = 120.0F;
+    settings.split_lambda = 0.7F;
+    settings.resolution = 2048;
+
+    const auto cascades = mgv::directional_light_cascades(
+        camera,
+        16.0F / 9.0F,
+        mgv::sun_direction_from_angles(140.0F, 45.0F),
+        settings);
+
+    REQUIRE(cascades.size() == 3);
+    CHECK(cascades[0].split_depth > 0.1F);
+    CHECK(cascades[0].split_depth < cascades[1].split_depth);
+    CHECK(cascades[1].split_depth < cascades[2].split_depth);
+    CHECK(cascades[2].split_depth == Catch::Approx(120.0F));
+    for (const auto& cascade : cascades) {
+        for (const auto value : cascade.view_projection) {
+            CHECK(std::isfinite(value));
+        }
+    }
+
+    CHECK(mgv::directional_light_cascades(
+              camera,
+              16.0F / 9.0F,
+              mgv::sun_direction_from_angles(140.0F, 45.0F),
+              settings) == cascades);
+}
+
+TEST_CASE("directional shadow cascades reject invalid policy") {
+    const mgv::Camera camera;
+    mgv::ShadowVolume settings;
+
+    settings.cascade_count = 0;
+    CHECK_THROWS_AS(
+        mgv::directional_light_cascades(camera, 1.0F, {0.0F, 1.0F, 0.0F}, settings),
+        std::invalid_argument);
+
+    settings.cascade_count = mgv::maximum_shadow_cascades + 1U;
+    CHECK_THROWS_AS(
+        mgv::directional_light_cascades(camera, 1.0F, {0.0F, 1.0F, 0.0F}, settings),
+        std::invalid_argument);
+
+    settings.cascade_count = 3;
+    settings.split_lambda = 1.1F;
+    CHECK_THROWS_AS(
+        mgv::directional_light_cascades(camera, 1.0F, {0.0F, 1.0F, 0.0F}, settings),
+        std::invalid_argument);
+}

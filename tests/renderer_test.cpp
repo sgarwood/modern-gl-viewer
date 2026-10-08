@@ -19,6 +19,9 @@ struct Calls final {
     int begins{};
     int draws{};
     int ends{};
+    int shadow_begins{};
+    int shadow_draws{};
+    int shadow_ends{};
     bool reject_pipelines{};
     bool reject_draws{};
     bool reject_samplers{};
@@ -43,6 +46,8 @@ struct Calls final {
     std::vector<mgv::Vec3> frame_camera_positions;
     std::vector<mgv::Environment> frame_environments;
     std::vector<std::size_t> frame_trail_sizes;
+    std::vector<std::uint32_t> shadow_cascade_indices;
+    std::vector<std::uint32_t> frame_shadow_cascade_counts;
 };
 
 [[nodiscard]] mgv::MeshData unit_triangle() {
@@ -113,8 +118,18 @@ public:
         calls_.frame_camera_positions.push_back(frame.camera_position);
         calls_.frame_environments.push_back(frame.environment);
         calls_.frame_trail_sizes.push_back(frame.wet_trail.size());
+        calls_.frame_shadow_cascade_counts.push_back(frame.sun_cascade_count);
+    }
+    void begin_shadow_pass(const mgv::Frame&, std::uint32_t cascade_index) override {
+        ++calls_.shadow_begins;
+        calls_.shadow_cascade_indices.push_back(cascade_index);
+        shadow_active_ = true;
     }
     void draw(const mgv::DrawPacket& packet) override {
+        if (shadow_active_) {
+            ++calls_.shadow_draws;
+            return;
+        }
         ++calls_.draws;
         calls_.transforms.push_back(packet.model_view_projection);
         calls_.models.push_back(packet.model);
@@ -135,10 +150,15 @@ public:
         }
     }
     void end_frame() noexcept override { ++calls_.ends; }
+    void end_shadow_pass() noexcept override {
+        ++calls_.shadow_ends;
+        shadow_active_ = false;
+    }
 
 private:
     Calls& calls_;
     mgv::RenderBackendCapabilities capabilities_;
+    bool shadow_active_{};
 };
 
 } // namespace
@@ -166,6 +186,24 @@ TEST_CASE("renderer facade creates backend resources and submits a frame") {
     CHECK(calls.begins == 1);
     CHECK(calls.draws == 1);
     CHECK(calls.ends == 1);
+}
+
+TEST_CASE("renderer submits each opaque caster to every directional shadow cascade") {
+    Calls calls;
+    mgv::RenderBackendCapabilities capabilities;
+    capabilities.directional_shadows = true;
+    mgv::Renderer renderer{std::make_unique<FakeBackend>(calls, capabilities)};
+    renderer.load(unit_triangle(), {"vertex", "fragment", "test.vert", "test.frag"});
+
+    renderer.render({.framebuffer_width = 1280, .framebuffer_height = 720});
+
+    CHECK(calls.shadow_begins == 3);
+    CHECK(calls.shadow_draws == 3);
+    CHECK(calls.shadow_ends == 3);
+    CHECK(calls.shadow_cascade_indices == std::vector<std::uint32_t>{0, 1, 2});
+    CHECK(calls.draws == 1);
+    REQUIRE(calls.frame_shadow_cascade_counts.size() == 1);
+    CHECK(calls.frame_shadow_cascade_counts.front() == 3);
 }
 
 TEST_CASE("renderer imports OBJ material primitives and reuses shared images") {
