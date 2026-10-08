@@ -1,5 +1,4 @@
 #include <cmath>
-#include <iostream>
 #include <mutex>
 #include "mgv/engine.hpp"
 
@@ -17,33 +16,6 @@
 
 namespace mgv {
 
-enum class GameState {
-    Setup,
-    InFlight,
-    Hike,
-    RangeFinder,
-    Retrieval
-};
-
-struct PathfindingNode {
-    Vec3 pos;
-};
-
-
-namespace {
-    Vec3 subtract(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
-    float length(const Vec3& a) { return std::sqrt(a.x*a.x + a.y*a.y + a.z*a.z); }
-    Vec3 add(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
-    Vec3 scaled(const Vec3& a, float s) { return {a.x * s, a.y * s, a.z * s}; }
-    Vec3 cross(const Vec3& a, const Vec3& b) {
-        return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-    }
-    Vec3 normalize(const Vec3& a) {
-        float len = std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
-        if (len < 1e-6f) return {0,0,0};
-        return {a.x / len, a.y / len, a.z / len};
-    }
-}
 
 namespace {
 
@@ -209,29 +181,6 @@ struct Engine::Impl final {
                                     .spin_axis_deg = 0.0F,
                                 });
                         }
-                    } else if (value.action == InputAction::toggle_range_finder) {
-                        is_range_finder_active_ = !is_range_finder_active_;
-                        auto cam = renderer.camera();
-                        if (is_range_finder_active_) {
-                            cam.look_at(Vec3{0.0f, 1.5f, 5.0f}, Vec3{0.0f, 0.0f, -10.0f});
-                            range_finder_base_target_ = Vec3{0.0f, 0.0f, -10.0f};
-                            std::cout << "[UI] RANGE FINDER DEPLOYED. Press F to Ping Distance." << std::endl;
-                        } else {
-                            cam.look_at(Vec3{-8.0f, 6.0f, -8.0f}, Vec3{0.0f, 0.0f, 0.0f});
-                            std::cout << "[UI] RANGE FINDER STOWED." << std::endl;
-                        }
-                        renderer.set_camera(cam);
-                    } else if (value.action == InputAction::range_finder_ping) {
-                        if (is_range_finder_active_) {
-                            auto cam = renderer.camera();
-                            Vec3 dir = normalize(subtract(cam.target(), cam.position()));
-                            auto hit = physics_world.raycast(physics::Position{cam.position()}, dir);
-                            if (hit) {
-                                std::cout << "[UI] PING! Target Acquired at: " << hit->distance << " meters." << std::endl;
-                            } else {
-                                std::cout << "[UI] PING! No Target In Sight." << std::endl;
-                            }
-                        }
                     } else {
                         camera_input->handle(value.action);
                     }
@@ -252,7 +201,6 @@ struct Engine::Impl final {
                     
                     float wetness = (value.temperature_c < 15.0f) ? 0.8f : 0.0f; 
                     physics_world.set_wetness(wetness);
-                    std::cout << "Engine applied live weather: Rho=" << rho << " kg/m^3, Wind=(" << vx << ", 0, " << vz << "), Wetness=" << wetness << std::endl;
                 } else if constexpr (std::is_same_v<Command, ApplyEntityImpulseCommand>) {
                     const auto& entity = find(value.entity);
                     if (!entity.body) {
@@ -355,21 +303,13 @@ void drain_commands() {
     std::deque<EngineCommand> commands;
     std::mutex commands_mutex;
 
-    GameState sm_state_{GameState::Setup};
-    std::optional<EntityId> sm_golf_ball_;
-    float sm_timer_{0.0f};
-    Vec3 sm_hike_start_;
-    Vec3 sm_hike_target_;
-
     std::vector<EntityRecord> entities;
     std::unique_ptr<network::NetworkEventSource> network_events;
     std::unique_ptr<NetworkEventDecoder> network_decoder;
     Clock::time_point started_at;
     Clock::time_point previous_tick;
+    float last_tick_seconds{};
 
-    bool is_range_finder_active_{false};
-    float sway_time_{0.0f};
-    Vec3 range_finder_base_target_{};
     std::optional<EntityId> active_ball;
     std::unique_ptr<hardware::LaunchMonitor> launch_monitor;
 
@@ -571,99 +511,14 @@ void Engine::tick(Viewport viewport) {
     }
     const auto elapsed = std::chrono::duration<float>{now - impl_->previous_tick}.count();
     impl_->previous_tick = now;
+    impl_->last_tick_seconds = elapsed;
     impl_->animation_system.advance(animation::AnimationDuration{elapsed});
     impl_->synchronize_animation();
-
-    // --- STATE MACHINE ---
-    if (impl_->sm_golf_ball_ && impl_->sm_state_ != GameState::RangeFinder) {
-        auto& ball_rec = impl_->find(*impl_->sm_golf_ball_);
-        if (ball_rec.body) {
-            auto& rb = impl_->physics_world.body(*ball_rec.body);
-            float speed = length(rb.linear_velocity().metres_per_second());
-            Vec3 ball_pos = rb.position().metres();
-            Vec3 hole_pos{0.0f, 0.0f, -10.0f}; 
-            
-            if (impl_->sm_state_ == GameState::Setup) {
-                if (speed > 1.0f) {
-                    impl_->sm_state_ = GameState::InFlight;
-                    std::cout << "[SM] Transition to InFlight!" << std::endl;
-                }
-            } else if (impl_->sm_state_ == GameState::InFlight) {
-                if (speed < 0.05f && rb.position().metres().y < 1.0f) {
-                    float dist = length(subtract(ball_pos, hole_pos));
-                    if (dist < 1.0f) {
-                        impl_->sm_state_ = GameState::Retrieval;
-                        impl_->sm_timer_ = 0.0f;
-                        std::cout << "[SM] HOLED! Transition to Retrieval!" << std::endl;
-                    } else {
-                        impl_->sm_state_ = GameState::Hike;
-                        impl_->sm_timer_ = 0.0f;
-                        impl_->sm_hike_start_ = impl_->renderer.camera().position();
-                        impl_->sm_hike_target_ = add(ball_pos, Vec3{2.0f, 2.0f, 2.0f});
-                        std::cout << "[SM] Ball stopped. Transition to Hike." << std::endl;
-                    }
-                }
-            } else if (impl_->sm_state_ == GameState::Hike) {
-                impl_->sm_timer_ += elapsed;
-                float t = std::min(impl_->sm_timer_ / 4.0f, 1.0f);
-                
-                Vec3 mid = add(scaled(impl_->sm_hike_start_, 0.5f), scaled(impl_->sm_hike_target_, 0.5f));
-                if (mid.z < -2.0f && mid.z > -8.0f) mid.x += 5.0f; 
-                
-                Vec3 p1 = add(scaled(impl_->sm_hike_start_, 1.0f - t), scaled(mid, t));
-                Vec3 p2 = add(scaled(mid, 1.0f - t), scaled(impl_->sm_hike_target_, t));
-                Vec3 cam_pos = add(scaled(p1, 1.0f - t), scaled(p2, t));
-                cam_pos.y = 1.5f + std::sin(impl_->sm_timer_ * 10.0f) * 0.1f;
-                
-                auto cam = impl_->renderer.camera();
-                cam.look_at(cam_pos, ball_pos);
-                impl_->renderer.set_camera(cam);
-                
-                if (t >= 1.0f) {
-                    impl_->sm_state_ = GameState::Setup;
-                    std::cout << "[SM] Reached ball. Setup." << std::endl;
-                }
-            } else if (impl_->sm_state_ == GameState::Retrieval) {
-                impl_->sm_timer_ += elapsed;
-                float t = std::min(impl_->sm_timer_ / 2.0f, 1.0f);
-                
-                auto cam = impl_->renderer.camera();
-                Vec3 t_cam = add(hole_pos, Vec3{0.0f, 1.5f, 0.5f});
-                Vec3 cam_pos = add(scaled(cam.position(), 1.0f - t), scaled(t_cam, t));
-                cam.look_at(cam_pos, hole_pos);
-                impl_->renderer.set_camera(cam);
-                
-                if (impl_->sm_timer_ > 2.0f) {
-                    std::cout << "[SM] Retrieving ball..." << std::endl;
-                    impl_->physics_world.set_velocity(*ball_rec.body, physics::LinearVelocity{{0, 5, 0}}, physics::AngularVelocity{{0,0,0}});
-                    impl_->sm_state_ = GameState::Setup;
-                }
-            }
-        }
-    }
 
     impl_->physics_world.simulate(physics::Duration{elapsed});
     impl_->synchronize_physics();
 
     impl_->record_wet_trail();
-
-
-    if (impl_->is_range_finder_active_) {
-        impl_->sway_time_ += elapsed;
-        auto cam = impl_->renderer.camera();
-        
-        Vec3 forward = normalize(subtract(impl_->range_finder_base_target_, cam.position()));
-        Vec3 right = normalize(cross(forward, Vec3{0,1,0}));
-        Vec3 up = normalize(cross(right, forward));
-        
-        // Procedural Sniper Sway (Perlin approximation)
-        float yaw_sway = std::sin(impl_->sway_time_ * 1.5f) * 0.1f + std::cos(impl_->sway_time_ * 0.8f) * 0.05f;
-        float pitch_sway = std::cos(impl_->sway_time_ * 1.2f) * 0.08f + std::sin(impl_->sway_time_ * 0.5f) * 0.04f;
-        
-        Vec3 swayed_target = add(impl_->range_finder_base_target_, add(scaled(right, yaw_sway), scaled(up, pitch_sway)));
-        cam.look_at(cam.position(), swayed_target);
-        impl_->renderer.set_camera(cam);
-    }
 
 
     const auto total_elapsed = std::chrono::duration<float>{now - impl_->started_at}.count();
@@ -687,6 +542,22 @@ Transform Engine::transform(EntityId entity) const {
 animation::PlaybackState Engine::animation_state(
     animation::AnimationPlayerId player) const {
     return impl_->animation_system.state(player);
+}
+
+float Engine::last_tick_seconds() const noexcept {
+    return impl_->last_tick_seconds;
+}
+
+std::optional<physics::LinearVelocity> Engine::linear_velocity(EntityId entity) const {
+    const auto& record = impl_->find(entity);
+    if (!record.body) {
+        return std::nullopt;
+    }
+    return impl_->physics_world.body(*record.body).linear_velocity();
+}
+
+std::optional<physics::RaycastHit> Engine::raycast(physics::Position origin, Vec3 direction) const {
+    return impl_->physics_world.raycast(origin, direction);
 }
 
 Camera Engine::camera() const {

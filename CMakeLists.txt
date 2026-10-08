@@ -110,6 +110,17 @@ target_include_directories(mgv_physics PUBLIC
 )
 target_link_libraries(mgv_physics PRIVATE mgv::project_warnings)
 
+add_library(mgv_game
+    src/game/round.cpp
+)
+add_library(mgv::game ALIAS mgv_game)
+target_compile_features(mgv_game PUBLIC cxx_std_20)
+target_include_directories(mgv_game PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include>"
+)
+target_link_libraries(mgv_game PUBLIC mgv::core PRIVATE mgv::project_warnings)
+
 add_library(mgv_golf
     src/golf/shot_model.cpp
 )
@@ -191,7 +202,7 @@ target_include_directories(mgv_runtime PUBLIC
     "$<INSTALL_INTERFACE:include>"
 )
 target_link_libraries(mgv_runtime
-    PUBLIC mgv::animation mgv::core mgv::golf mgv::network mgv::physics mgv::hardware
+    PUBLIC mgv::animation mgv::core mgv::game mgv::golf mgv::network mgv::physics mgv::hardware
     PRIVATE mgv::project_warnings
 )
 
@@ -381,6 +392,7 @@ if(BUILD_TESTING)
         tests/camera_test.cpp
         tests/camera_controller_test.cpp
         tests/engine_test.cpp
+        tests/game/round_test.cpp
         tests/golf/shot_model_test.cpp
         tests/image_loader_test.cpp
         tests/lighting_test.cpp

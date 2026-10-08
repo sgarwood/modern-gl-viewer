@@ -55,6 +55,9 @@ types.
 The rendering pipeline, shader contract, units, and the offscreen capture tool are
 documented in [`docs/rendering.md`](docs/rendering.md).
 
+The round's state machine, its ports, and why it does not live in the engine are
+documented in [`docs/round.md`](docs/round.md).
+
 Research into how the industry solves the vegetation and terrain problems this
 renderer has hit, what was adopted and what was deliberately not, is recorded in
 [`docs/research-vegetation-and-terrain.md`](docs/research-vegetation-and-terrain.md).
@@ -211,7 +214,7 @@ NetworkService -> NetworkEventSource -> NetworkEventDecoder -> queued EngineComm
 ```
 
 The CMake targets mirror these boundaries: `mgv::core`, `mgv::animation`, `mgv::golf`, `mgv::physics`,
-`mgv::network`, `mgv::runtime`, `mgv::opengl`, `mgv::qt_frontend`, and the optional QML/Qt/GLFW
+`mgv::network`, `mgv::game`, `mgv::runtime`, `mgv::opengl`, `mgv::qt_frontend`, and the optional QML/Qt/GLFW
 entrypoints. Ozz is private to `mgv::animation`; public engine and frontend headers expose no Ozz
 types. A future Vulkan or Direct3D adapter can replace `mgv::opengl` without changing OBJ, camera,
 animation, golf-shot, shader-file, networking, or scene orchestration code.

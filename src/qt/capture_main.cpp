@@ -41,6 +41,19 @@ namespace {
 
 /// Parses "x,y,z" into a vector, returning nothing when the text is not three
 /// finite numbers.
+[[nodiscard]] const char* round_event_name(mgv::game::RoundEvent event) {
+    switch (event) {
+    case mgv::game::RoundEvent::ball_struck: return "ball struck";
+    case mgv::game::RoundEvent::ball_came_to_rest: return "ball came to rest";
+    case mgv::game::RoundEvent::ball_holed: return "ball holed";
+    case mgv::game::RoundEvent::reached_ball: return "reached ball";
+    case mgv::game::RoundEvent::range_finder_deployed: return "range finder deployed";
+    case mgv::game::RoundEvent::range_finder_stowed: return "range finder stowed";
+    case mgv::game::RoundEvent::none: break;
+    }
+    return "none";
+}
+
 [[nodiscard]] std::optional<mgv::Vec3> parse_vec3(const QString& value) {
     const auto parts = value.split(QChar{','}, Qt::SkipEmptyParts);
     if (parts.size() != 3) {
@@ -261,7 +274,7 @@ int main(int argc, char** argv) {
         const auto walk = parser.isSet(walk_option) ? parser.value(walk_option).toFloat() : 0.0F;
         auto streamed = 0;
         if (parser.isSet(shot_option)) {
-            engine->enqueue(mgv::InputAction::fire_test_shot);
+            mgv::play_test_shot(*engine, session);
         }
         for (int frame = 0; frame < frames; ++frame) {
             if (walk != 0.0F) {
@@ -286,6 +299,10 @@ int main(int argc, char** argv) {
                 }
             }
             streamed += mgv::stream_course(*engine, session, description) ? 1 : 0;
+            const auto event = mgv::advance_round(*engine, session, description);
+            if (event != mgv::game::RoundEvent::none) {
+                std::printf("round: %s\n", round_event_name(event));
+            }
             engine->tick({width, height});
         }
         std::printf("streamed=%d\n", streamed);

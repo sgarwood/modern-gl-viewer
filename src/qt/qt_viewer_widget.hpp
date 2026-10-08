@@ -9,6 +9,7 @@
 
 #include <exception>
 #include <memory>
+#include <optional>
 
 class QKeyEvent;
 
@@ -37,6 +38,8 @@ private:
     std::unique_ptr<mgv::Engine> engine_;
     mgv::CourseSessionDescription course_;
     mgv::CourseSession session_;
+    /// The last yardage the range finder reported, in metres.
+    std::optional<float> last_range_;
     QTimer animation_timer_;
     QString error_;
 };

@@ -1,11 +1,13 @@
 #pragma once
 
 #include "mgv/engine.hpp"
+#include "mgv/game/round.hpp"
 #include "mgv/lighting.hpp"
 #include "mgv/primitives.hpp"
 #include "mgv/renderer.hpp"
 
 #include <filesystem>
+#include <memory>
 #include <optional>
 
 namespace mgv {
@@ -88,6 +90,11 @@ struct CourseSessionDescription final {
     /// Where the ball is teed or lying, in the ground plane. Its height comes
     /// from the terrain, so it always starts resting on the surface.
     Vec2 ball_start{4.6F, -44.0F};
+    /// Where the cup is cut, in the ground plane. The pin, the collar, and
+    /// the round's idea of "holed" all come from this one number.
+    Vec2 hole{1.9F, -2.4F};
+    /// How the round is played. Its hole is filled in from `hole`.
+    game::RoundRules round;
 };
 
 /// A hole that has been built, and the handles needed to keep it up to date
@@ -105,7 +112,35 @@ struct CourseSession final {
     Vec2 terrain_centre{};
     /// Where the blade field is currently centred.
     Vec2 grass_centre{};
+    /// The round being played, and the ground it walks over. Held by shared
+    /// pointer because a session is passed around by value and the round
+    /// holds a reference to its ground.
+    std::shared_ptr<class CourseRound> round;
 };
+
+/// Advances the round and applies the camera it asks for.
+///
+/// Frontends call this each frame, alongside `stream_course`. The round is
+/// deliberately not inside `Engine::tick`: the engine is a renderer runtime,
+/// and the rules of golf are not its business.
+game::RoundEvent advance_round(
+    Engine& engine,
+    const CourseSession& session,
+    const CourseSessionDescription& description);
+
+/// Strikes the ball towards the hole with the deterministic test swing.
+///
+/// Which way the green lies is a property of the round, so this aims at it;
+/// `InputAction::fire_test_shot` handled inside the engine fires straight
+/// down -Z, which is a viewer debug command rather than a played shot.
+void play_test_shot(Engine& engine, const CourseSession& session);
+
+/// Raises or stows the range finder.
+game::RoundEvent toggle_range_finder(Engine& engine, const CourseSession& session);
+
+/// Ranges whatever the range finder is pointing at, in metres. Nothing when
+/// it is stowed or nothing is in the way.
+[[nodiscard]] std::optional<float> range_find(Engine& engine, const CourseSession& session);
 
 /// Builds the sky dome, terrain, trees, leaves, grass, and ball, binds the
 /// ball to a rigid body, installs the ground collider, and applies the

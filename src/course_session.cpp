@@ -217,6 +217,19 @@ struct TreePlacement final {
     return physics::Collider::heightmap(samples, samples, spacing, spacing, std::move(heights));
 }
 
+/// The generated course, presented to the round as ground it can walk on.
+class CourseGround final : public game::GroundHeights {
+public:
+    explicit CourseGround(CourseTerrainDescription terrain) : terrain_{terrain} {}
+
+    [[nodiscard]] float height_at(float x, float z) const override {
+        return course_terrain_height(x, z, terrain_);
+    }
+
+private:
+    CourseTerrainDescription terrain_;
+};
+
 /// Merges every primitive of an imported model into one mesh.
 ///
 /// The course meshes are single-material surfaces, and collapsing them keeps
@@ -238,6 +251,17 @@ struct TreePlacement final {
 }
 
 } // namespace
+
+/// Owns the round and the ground it refers to, so a session can be passed
+/// around without the reference dangling.
+class CourseRound final {
+public:
+    CourseRound(CourseTerrainDescription terrain, game::RoundRules rules)
+        : ground{terrain}, round{rules, ground} {}
+
+    CourseGround ground;
+    game::Round round;
+};
 
 CourseSession configure_course_session(Engine& engine, const CourseSessionDescription& description) {
     const auto& shaders = description.assets.shader_directory;
@@ -287,7 +311,7 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
     // The hole sits a little off centre on the green, as a real pin position
     // does, and the stick is the tallest thing for twenty metres, so it is
     // what proves the shadow map is working.
-    const Vec3 hole{1.9F, 0.0F, -2.4F};
+    const Vec3 hole{description.hole.x, 0.0F, description.hole.y};
     const auto hole_height = course_terrain_height(hole.x, hole.z, description.terrain);
     constexpr float pin_height = 2.13F;
 
@@ -483,6 +507,9 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
     engine.set_camera(std::move(camera));
     engine.set_environment(description.environment);
 
+    auto rules = description.round;
+    rules.hole = description.hole;
+
     return {
         .ball = ball,
         .terrain = entities[terrain_index],
@@ -491,7 +518,77 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
         .grass = grass_index ? std::optional<EntityId>{entities[*grass_index]} : std::nullopt,
         .terrain_centre = snapped_terrain_centre(tessellation),
         .grass_centre = grass_field.centre,
+        .round = std::make_shared<CourseRound>(description.terrain, rules),
     };
+}
+
+game::RoundEvent advance_round(
+    Engine& engine,
+    const CourseSession& session,
+    const CourseSessionDescription& description) {
+    if (!session.round) {
+        return game::RoundEvent::none;
+    }
+    const auto lie = engine.transform(session.ball).position();
+    const auto velocity = engine.linear_velocity(session.ball);
+    const auto speed = velocity
+        ? std::sqrt(
+              velocity->metres_per_second().x * velocity->metres_per_second().x +
+              velocity->metres_per_second().y * velocity->metres_per_second().y +
+              velocity->metres_per_second().z * velocity->metres_per_second().z)
+        : 0.0F;
+
+    const auto update = session.round->round.update({
+        .elapsed_seconds = engine.last_tick_seconds(),
+        .ball_position = lie,
+        .ball_speed = speed,
+    });
+
+    if (update.directs_camera) {
+        auto camera = engine.camera();
+        camera.look_at(update.eye, update.look_at);
+        camera.set_perspective(
+            description.viewpoint.vertical_field_of_view_degrees,
+            description.viewpoint.near_plane,
+            description.viewpoint.far_plane);
+        engine.set_camera(std::move(camera));
+    }
+    return update.event;
+}
+
+void play_test_shot(Engine& engine, const CourseSession& session) {
+    if (!session.round) {
+        return;
+    }
+    const auto lie = engine.transform(session.ball).position();
+    engine.submit_shot(golf::FullSwingData{
+        .ball_speed_mps = 55.0F,
+        .launch_angle_deg = 15.0F,
+        .launch_direction_deg = session.round->round.aim_bearing_degrees(lie),
+        .total_spin_rpm = 3'000.0F,
+        .spin_axis_deg = 0.0F,
+    });
+}
+
+game::RoundEvent toggle_range_finder(Engine& engine, const CourseSession& session) {
+    if (!session.round) {
+        return game::RoundEvent::none;
+    }
+    const auto lie = engine.transform(session.ball).position();
+    return session.round->round.toggle_range_finder(
+        {.elapsed_seconds = engine.last_tick_seconds(), .ball_position = lie, .ball_speed = 0.0F});
+}
+
+std::optional<float> range_find(Engine& engine, const CourseSession& session) {
+    if (!session.round) {
+        return std::nullopt;
+    }
+    const auto direction = session.round->round.sight_direction();
+    if (!direction) {
+        return std::nullopt;
+    }
+    const auto hit = engine.raycast(physics::Position{engine.camera().position()}, *direction);
+    return hit ? std::optional<float>{hit->distance} : std::nullopt;
 }
 
 bool stream_course(
@@ -556,7 +653,15 @@ bool stream_course(
 }
 
 CourseSessionDescription default_course_session(const std::filesystem::path& asset_directory) {
-    Environment environment;
+    // Built by assignment rather than as a designated aggregate. Naming a
+    // member in a designated initializer and giving it {} discards its
+    // default member initializer rather than keeping it, so every field this
+    // function does not care about would be silently zeroed.
+    CourseSessionDescription description;
+    description.assets.ball_model = asset_directory / "ball.obj";
+    description.assets.shader_directory = asset_directory / "shaders";
+
+    auto& environment = description.environment;
     environment.sun.direction = sun_direction_from_angles(158.0F, 43.0F);
     environment.sun.color = {1.0F, 0.96F, 0.90F};
     environment.sun.illuminance = 98'000.0F;
@@ -570,19 +675,7 @@ CourseSessionDescription default_course_session(const std::filesystem::path& ass
     environment.surface_wetness = 0.25F;
     environment.exposure = exposure_from_ev100(14.0F);
 
-    return {
-        .assets = {
-            .ball_model = asset_directory / "ball.obj",
-            .shader_directory = asset_directory / "shaders",
-        },
-        .terrain = {},
-        .tessellation = {},
-        .collision = {},
-        .grass = {},
-        .litter = {},
-        .viewpoint = {},
-        .environment = environment,
-    };
+    return description;
 }
 
 float exposure_from_ev100(float ev100) noexcept {

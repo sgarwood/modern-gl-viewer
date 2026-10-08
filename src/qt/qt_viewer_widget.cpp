@@ -51,7 +51,16 @@ void QtViewerWidget::handle_input(mgv::InputAction action) {
     if (!engine_) {
         return;
     }
-    engine_->enqueue(action);
+    // The range finder is a matter for the round, not the view.
+    if (action == mgv::InputAction::fire_test_shot) {
+        mgv::play_test_shot(*engine_, session_);
+    } else if (action == mgv::InputAction::toggle_range_finder) {
+        static_cast<void>(mgv::toggle_range_finder(*engine_, session_));
+    } else if (action == mgv::InputAction::range_finder_ping) {
+        last_range_ = mgv::range_find(*engine_, session_);
+    } else {
+        engine_->enqueue(action);
+    }
     update();
 }
 
@@ -82,6 +91,7 @@ void QtViewerWidget::paintGL() {
             // Detail follows the camera, so this has to run before the frame
             // that uses it.
             static_cast<void>(mgv::stream_course(*engine_, session_, course_));
+            static_cast<void>(mgv::advance_round(*engine_, session_, course_));
             const auto scale = devicePixelRatioF();
             engine_->tick({
                 .framebuffer_width = std::max(1, static_cast<int>(std::lround(static_cast<double>(width()) * scale))),

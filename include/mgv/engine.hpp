@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -182,6 +183,13 @@ public:
     [[nodiscard]] Transform transform(EntityId entity) const;
     [[nodiscard]] animation::PlaybackState animation_state(
         animation::AnimationPlayerId player) const;
+    /// How long the previous tick covered, in seconds. Game logic driven
+    /// alongside the engine uses this rather than keeping a second clock.
+    [[nodiscard]] float last_tick_seconds() const noexcept;
+    [[nodiscard]] std::optional<physics::LinearVelocity> linear_velocity(EntityId entity) const;
+    [[nodiscard]] std::optional<physics::RaycastHit> raycast(
+        physics::Position origin,
+        Vec3 direction) const;
     [[nodiscard]] Camera camera() const;
     void set_camera(Camera camera);
     void set_environment(Environment environment);
