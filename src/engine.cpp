@@ -342,6 +342,13 @@ void drain_commands() {
             if (!entity.animation_player) {
                 continue;
             }
+            // A skinned entity keeps the transform it was placed with. Its
+            // motion is already in the joint palette, so taking the root
+            // joint's pose as the render transform would both discard where
+            // the character was put and apply its movement a second time.
+            if (entity.skin) {
+                continue;
+            }
             entity.transform = animation_system.root_transform(*entity.animation_player);
             renderer.set_renderable_transform(entity.renderable, entity.transform);
         }
@@ -478,8 +485,10 @@ animation::AnimationPlayerId Engine::bind_animation(
     }
     const auto player = impl_->animation_system.create_player(clip);
     record.animation_player = player;
-    record.transform = impl_->animation_system.root_transform(player);
-    impl_->renderer.set_renderable_transform(record.renderable, record.transform);
+    // Binding does not touch the transform. synchronize_animation owns it
+    // and takes it over on the first tick, which leaves a window in which a
+    // skin can be bound -- and a skinned entity keeps its placement, since
+    // its motion is in the palette rather than in the root joint.
     return player;
 }
 

@@ -1,5 +1,6 @@
 #include "mgv/course_session.hpp"
 
+#include "mgv/gltf_loader.hpp"
 #include "mgv/obj_loader.hpp"
 
 #include <algorithm>
@@ -441,6 +442,61 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
         scene.add(std::move(grass));
     }
 
+    // --- a character ---------------------------------------------------------
+    std::optional<std::size_t> character_index;
+    std::optional<ImportedSkin> character_skin;
+    if (description.character) {
+        const auto& wanted = *description.character;
+        auto imported = GltfLoader{}.load(wanted.model);
+        auto character_material = load_material(shaders, "skinned");
+        auto skinned_pipeline = character_material->pipeline();
+        skinned_pipeline.rasterization.cull_mode = CullMode::none;
+        const auto skinned_material =
+            std::make_shared<const Material>(std::move(skinned_pipeline));
+
+        auto mesh = flatten(imported);
+        // flatten drops the skinning stream, so carry it across from the one
+        // primitive that has it. A character is a single skinned mesh in
+        // every export worth loading.
+        for (const auto& primitive : imported.primitives) {
+            if (primitive.mesh.skinned()) {
+                mesh.skinning = primitive.mesh.skinning;
+                break;
+            }
+        }
+
+        const auto ground = course_terrain_height(
+            wanted.position.x, wanted.position.y, description.terrain);
+        constexpr float degrees_to_radians = 3.14159265F / 180.0F;
+        const auto facing = Quaternion::from_axis_angle(
+            {0.0F, 1.0F, 0.0F}, wanted.facing_degrees * degrees_to_radians);
+        // The import rotation goes on the model matrix rather than into the
+        // vertices, because the skinning palette is in the skeleton's own
+        // space: rotating the mesh without rotating the palette would just
+        // tear the character apart.
+        const auto upright = wanted.z_up
+            ? Quaternion::from_axis_angle({1.0F, 0.0F, 0.0F}, -90.0F * degrees_to_radians)
+            : Quaternion{};
+        Transform placement;
+        placement.set_position({wanted.position.x, ground, wanted.position.y})
+            .set_rotation(facing * upright)
+            .set_uniform_scale(wanted.scale);
+
+        MaterialInstance instance{skinned_material};
+        const auto albedo = imported.materials.empty()
+            ? Vec3{0.62F, 0.60F, 0.58F}
+            : imported.materials.front().diffuse_color;
+        instance.set_color("uBaseColorFactor", {albedo.x, albedo.y, albedo.z, 0.65F});
+
+        character_index = scene.size();
+        character_skin = imported.skin;
+        scene.add(Renderable{
+            std::make_shared<const MeshData>(std::move(mesh)),
+            std::make_shared<const MaterialInstance>(std::move(instance)),
+            placement,
+        });
+    }
+
     const auto ball_index = scene.size();
     scene.add(Renderable{
         std::make_shared<const MeshData>(
@@ -506,6 +562,17 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
         description.viewpoint.far_plane);
     engine.set_camera(std::move(camera));
     engine.set_environment(description.environment);
+
+    if (character_index && character_skin && description.character) {
+        const auto entity = entities[*character_index];
+        const auto clip = engine.load_animation({
+            .skeleton = description.character->skeleton,
+            .animation = description.character->animation,
+        });
+        const auto player = engine.bind_animation(entity, clip);
+        engine.bind_skin(entity, player, *character_skin);
+        engine.enqueue(PlayAnimationCommand{player});
+    }
 
     auto rules = description.round;
     rules.hole = description.hole;

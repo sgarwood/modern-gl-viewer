@@ -276,3 +276,34 @@ TEST_CASE("a skin missing an inverse bind matrix is refused") {
     CHECK_THROWS_AS(
         engine.bind_skin(entities.front(), player, *model.skin), std::invalid_argument);
 }
+
+TEST_CASE("a skinned entity keeps the transform it was placed with") {
+    const RiggedAssets assets;
+    const auto model = load_banner();
+
+    Captured captured;
+    mgv::Engine engine{std::make_unique<CapturingBackend>(captured)};
+
+    auto scene = banner_scene(model);
+    mgv::Transform placement;
+    placement.set_position({12.0F, 3.0F, -40.0F}).set_uniform_scale(2.0F);
+    scene.renderable(scene.renderable_ids().front()).set_transform(placement);
+
+    const auto entities = engine.set_scene(std::move(scene));
+    const auto clip = engine.load_animation(assets.paths());
+    const auto player = engine.bind_animation(entities.front(), clip);
+    engine.bind_skin(entities.front(), player, *model.skin);
+    engine.enqueue(mgv::PlayAnimationCommand{player});
+
+    engine.tick({64, 64});
+    engine.tick({64, 64});
+
+    // Binding an animation to a rigid entity hands the root joint's pose the
+    // entity's transform. For a skinned one that is wrong twice over: the
+    // placement is discarded, and the motion -- already in the palette --
+    // is applied again on top of it. The character ends up animating
+    // correctly at the world origin, wherever it was actually put.
+    const auto placed = engine.transform(entities.front());
+    CHECK(placed.position() == mgv::Vec3{12.0F, 3.0F, -40.0F});
+    CHECK(placed.scale().x == Catch::Approx(2.0F));
+}

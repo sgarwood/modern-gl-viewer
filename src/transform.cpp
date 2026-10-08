@@ -37,6 +37,15 @@ Quaternion Quaternion::from_axis_angle(Vec3 axis, float radians) {
     };
 }
 
+Quaternion operator*(const Quaternion& lhs, const Quaternion& rhs) noexcept {
+    return {
+        lhs.w * rhs.x + lhs.x * rhs.w + lhs.y * rhs.z - lhs.z * rhs.y,
+        lhs.w * rhs.y - lhs.x * rhs.z + lhs.y * rhs.w + lhs.z * rhs.x,
+        lhs.w * rhs.z + lhs.x * rhs.y - lhs.y * rhs.x + lhs.z * rhs.w,
+        lhs.w * rhs.w - lhs.x * rhs.x - lhs.y * rhs.y - lhs.z * rhs.z,
+    };
+}
+
 Transform& Transform::set_position(Vec3 value) noexcept {
     position_ = value;
     return *this;

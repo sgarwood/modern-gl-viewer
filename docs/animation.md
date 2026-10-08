@@ -67,6 +67,22 @@ The palette is a plain uniform array, so its size is bounded by the vertex stage
 The backend reports what it can take as `RenderBackendCapabilities::max_skinning_joints`,
 reserving a quarter of the budget, which clears a humanoid rig comfortably.
 
+Skinned casters are skinned in the depth pass too. A shadow map rendered from bind-pose geometry
+puts a figure walking across a fairway alongside the silhouette of one standing still, which is
+obvious the moment the sun is anywhere but overhead.
+
+A skinned entity **keeps the transform it was placed with**. For a rigid animated entity the root
+joint's pose owns the render transform; for a skinned one that is wrong twice over, because the
+motion is already in the palette and applying it again discards where the character was put.
+Binding an animation no longer touches the transform at all: `synchronize_animation` owns it and
+takes it over on the first tick, which leaves the window in which a skin can be bound.
+
+Characters are frequently authored Z-up. glTF declares Y-up, but exports that began life in a
+Z-up tool carry the correction on a node above the skeleton, which a skeleton converter has no
+reason to keep. `CourseCharacter::z_up` applies the correction to the model matrix rather than to
+the vertices: the palette is in the skeleton's own space, so rotating the mesh without rotating
+the palette tears the character apart.
+
 Blending, layers, events, and inverse kinematics remain future work, as does attaching equipment
 to a joint -- though the palette that needs is now published.
 

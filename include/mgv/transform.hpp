@@ -11,6 +11,11 @@ struct Quaternion final {
     float w{1.0F};
 
     [[nodiscard]] static Quaternion from_axis_angle(Vec3 axis, float radians);
+
+    /// Composition: `a * b` applies `b` first, then `a`, matching how the
+    /// equivalent matrices would multiply.
+    friend Quaternion operator*(const Quaternion& lhs, const Quaternion& rhs) noexcept;
+
     friend bool operator==(const Quaternion&, const Quaternion&) = default;
 };
 

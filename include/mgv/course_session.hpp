@@ -40,6 +40,30 @@ struct CourseViewpoint final {
     float far_plane{4'000.0F};
 };
 
+/// A skinned character to stand on the course.
+///
+/// All three parts are needed: the rigged mesh, and the skeleton and clip it
+/// is driven by. The skeleton and clip are converted separately -- by
+/// `gltf2ozz` -- which is exactly why the skin binds to them by joint name.
+struct CourseCharacter final {
+    std::filesystem::path model;
+    std::filesystem::path skeleton;
+    std::filesystem::path animation;
+    /// Where the character stands, in the ground plane.
+    Vec2 position{};
+    /// Compass bearing it faces, degrees.
+    float facing_degrees{};
+    /// Uniform scale. Characters are rarely authored in metres.
+    float scale{1.0F};
+    /// Whether the asset was authored Z-up and needs standing upright.
+    ///
+    /// glTF declares Y-up, but exports that began life in a Z-up tool
+    /// frequently carry the correction on a node above the skeleton, which a
+    /// skeleton converter has no reason to keep. The symptom is a character
+    /// that renders flawlessly, lying on its back.
+    bool z_up{};
+};
+
 /// The models and shader directory a hole is built from.
 ///
 /// The terrain is generated rather than loaded: it has to agree exactly with
@@ -85,6 +109,8 @@ struct CourseSessionDescription final {
     GrassFieldDescription grass;
     /// Fallen leaves, drifted against the broadleaf trees.
     LeafLitterDescription litter;
+    /// A skinned character, if one is wanted.
+    std::optional<CourseCharacter> character;
     CourseViewpoint viewpoint;
     Environment environment;
     /// Where the ball is teed or lying, in the ground plane. Its height comes

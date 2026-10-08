@@ -122,6 +122,16 @@ int main(int argc, char** argv) {
         "wind", "Wind speed in metres per second.", "mps"};
     const QCommandLineOption ball_option{
         "ball", "Where the ball lies, \"x,0,z\" in the ground plane.", "vec3"};
+    const QCommandLineOption character_option{
+        "character",
+        "Rigged glTF to stand on the course, as \"model.glb,skeleton.ozz,animation.ozz\".",
+        "paths"};
+    const QCommandLineOption character_at_option{
+        "character-at", "Where the character stands, \"x,facing,z\".", "vec3"};
+    const QCommandLineOption character_scale_option{
+        "character-scale", "Uniform scale for the character.", "scale"};
+    const QCommandLineOption character_z_up_option{
+        "character-z-up", "Stand a Z-up asset upright."};
     const QCommandLineOption shot_option{
         "shot", "Fire the deterministic test shot on the first frame."};
     const QCommandLineOption walk_option{
@@ -151,6 +161,10 @@ int main(int argc, char** argv) {
                                ball_option,
                                walk_option,
                                shot_option,
+                               character_option,
+                               character_at_option,
+                               character_scale_option,
+                               character_z_up_option,
                                camera_option,
                                target_option,
                                fov_option,
@@ -251,6 +265,32 @@ int main(int argc, char** argv) {
         }
         if (parser.isSet(turbidity_option)) {
             description.environment.turbidity = parser.value(turbidity_option).toFloat();
+        }
+        if (parser.isSet(character_option)) {
+            const auto parts = parser.value(character_option).split(QChar{','});
+            if (parts.size() != 3) {
+                std::fprintf(
+                    stderr, "--character expects \"model,skeleton,animation\".\n");
+                return 2;
+            }
+            mgv::CourseCharacter character;
+            character.model = path_from(parts[0].trimmed());
+            character.skeleton = path_from(parts[1].trimmed());
+            character.animation = path_from(parts[2].trimmed());
+            if (parser.isSet(character_at_option)) {
+                const auto at = parse_vec3(parser.value(character_at_option));
+                if (!at) {
+                    std::fprintf(stderr, "--character-at expects \"x,facing,z\".\n");
+                    return 2;
+                }
+                character.position = {at->x, at->z};
+                character.facing_degrees = at->y;
+            }
+            if (parser.isSet(character_scale_option)) {
+                character.scale = parser.value(character_scale_option).toFloat();
+            }
+            character.z_up = parser.isSet(character_z_up_option);
+            description.character = character;
         }
         if (parser.isSet(ball_option)) {
             const auto lie = parse_vec3(parser.value(ball_option));

@@ -9,6 +9,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <span>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
@@ -716,15 +717,41 @@ private:
 
 constexpr GLsizei shadow_map_resolution = 2048;
 
+constexpr GLsizei depth_max_joints = 64;
+
 constexpr std::string_view depth_vertex_source = R"(#version 410 core
 layout(location = 0) in vec3 aPosition;
 layout(location = 3) in vec4 aInstancePosition;   // xyz offset, w yaw
 layout(location = 4) in vec4 aInstanceParameters; // x scale
+layout(location = 5) in uvec4 aJoints;
+layout(location = 6) in vec4 aWeights;
 uniform mat4 uMvp;
+uniform mat4 uJoints[64];
+uniform int uJointCount;
 void main() {
+    // A skinned caster must be posed here exactly as it is in the colour
+    // pass, or its shadow is the bind pose: a character walking across a
+    // fairway trailed by the silhouette of one standing still.
+    vec3 posed = aPosition;
+    if (uJointCount > 0) {
+        mat4 skin = mat4(0.0);
+        float total = 0.0;
+        for (int influence = 0; influence < 4; ++influence) {
+            int joint = int(aJoints[influence]);
+            float weight = aWeights[influence];
+            if (weight <= 0.0 || joint >= uJointCount || joint >= 64) {
+                continue;
+            }
+            skin += uJoints[joint] * weight;
+            total += weight;
+        }
+        if (total > 0.0) {
+            posed = (skin * vec4(aPosition, 1.0)).xyz;
+        }
+    }
     float sine = sin(aInstancePosition.w);
     float cosine = cos(aInstancePosition.w);
-    vec3 local = aPosition * max(aInstanceParameters.x, 1e-4);
+    vec3 local = posed * max(aInstanceParameters.x, 1e-4);
     vec3 placed = vec3(
         local.x * cosine + local.z * sine,
         local.y,
@@ -792,6 +819,8 @@ public:
             throw std::runtime_error{"Shadow shader link failed:\n" + program_log(program_.get())};
         }
         mvp_location_ = glGetUniformLocation(program_.get(), "uMvp");
+        joints_location_ = glGetUniformLocation(program_.get(), "uJoints");
+        joint_count_location_ = glGetUniformLocation(program_.get(), "uJointCount");
     }
 
     ~ShadowMap() { glDeleteTextures(1, &depth_texture_); }
@@ -830,9 +859,20 @@ public:
         glUseProgram(program_.get());
     }
 
-    void draw(const OpenGlMesh& mesh, const Mat4& model_view_projection) const {
+    void draw(
+        const OpenGlMesh& mesh,
+        const Mat4& model_view_projection,
+        std::span<const Mat4> joints) const {
         if (mvp_location_ >= 0) {
             glUniformMatrix4fv(mvp_location_, 1, GL_FALSE, model_view_projection.data());
+        }
+        const auto count = static_cast<GLsizei>(
+            std::min<std::size_t>(joints.size(), static_cast<std::size_t>(depth_max_joints)));
+        if (joint_count_location_ >= 0) {
+            glUniform1i(joint_count_location_, count);
+        }
+        if (joints_location_ >= 0 && count > 0) {
+            glUniformMatrix4fv(joints_location_, count, GL_FALSE, joints.data()->data());
         }
         glBindVertexArray(mesh.vertex_array());
         glDrawElementsInstanced(
@@ -850,6 +890,8 @@ private:
     Program program_;
     GLuint depth_texture_{};
     GLint mvp_location_{-1};
+    GLint joints_location_{-1};
+    GLint joint_count_location_{-1};
     bool complete_{};
 };
 
@@ -1243,7 +1285,7 @@ public:
     void draw(const DrawPacket& packet) override {
         const auto& gl_mesh = backend_resource<OpenGlMesh>(packet.mesh, "mesh");
         if (in_shadow_pass_) {
-            shadow_map_->draw(gl_mesh, packet.model_view_projection);
+            shadow_map_->draw(gl_mesh, packet.model_view_projection, packet.joints);
             return;
         }
         const auto& pipeline = backend_resource<OpenGlPipeline>(packet.pipeline, "pipeline");

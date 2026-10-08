@@ -39,3 +39,32 @@ TEST_CASE("transform composes translation rotation and non-uniform scale") {
 TEST_CASE("quaternion construction rejects a zero axis") {
     CHECK_THROWS_AS(mgv::Quaternion::from_axis_angle({}, 1.0F), std::invalid_argument);
 }
+
+TEST_CASE("quaternion composition applies the right-hand rotation first") {
+    constexpr float quarter_turn = 1.57079633F;
+    const auto yaw = mgv::Quaternion::from_axis_angle({0.0F, 1.0F, 0.0F}, quarter_turn);
+    const auto pitch = mgv::Quaternion::from_axis_angle({1.0F, 0.0F, 0.0F}, quarter_turn);
+
+    mgv::Transform composed;
+    composed.set_rotation(yaw * pitch);
+    mgv::Transform stepwise_yaw;
+    stepwise_yaw.set_rotation(yaw);
+
+    // Pitch takes +Y to +Z; yaw then takes +Z to +X. So up ends up pointing
+    // along +X, and the matrix's Y column -- where +Y lands -- is (1, 0, 0).
+    const auto matrix = composed.matrix();
+    CHECK(matrix[4] == Catch::Approx(1.0F).margin(1.0e-5F));
+    CHECK(matrix[5] == Catch::Approx(0.0F).margin(1.0e-5F));
+    CHECK(matrix[6] == Catch::Approx(0.0F).margin(1.0e-5F));
+
+    SECTION("composition is not commutative, so the order is load-bearing") {
+        mgv::Transform other;
+        other.set_rotation(pitch * yaw);
+        CHECK(other.matrix() != matrix);
+    }
+    SECTION("composing with the identity changes nothing") {
+        mgv::Transform same;
+        same.set_rotation(yaw * mgv::Quaternion{});
+        CHECK(same.matrix() == stepwise_yaw.matrix());
+    }
+}
