@@ -282,6 +282,8 @@ public:
             4, 4, GL_FLOAT, GL_FALSE, sizeof(MeshInstance),
             reinterpret_cast<void*>(offsetof(MeshInstance, parameters)));
         glVertexAttribDivisor(4, 1);
+
+        upload_skinning(mesh);
         glBindVertexArray(0);
     }
 
@@ -315,12 +317,14 @@ public:
             static_cast<GLsizeiptr>(instances * sizeof(MeshInstance)),
             instance_data,
             GL_DYNAMIC_DRAW);
+        upload_skinning(mesh);
         glBindVertexArray(0);
     }
 
     [[nodiscard]] GLuint vertex_array() const noexcept { return vertex_array_.get(); }
     [[nodiscard]] GLsizei index_count() const noexcept { return index_count_; }
     [[nodiscard]] GLsizei instance_count() const noexcept { return instance_count_; }
+    [[nodiscard]] bool skinned() const noexcept { return skinned_; }
 
 private:
     [[nodiscard]] static GLsizei checked_count(std::size_t count) {
@@ -330,12 +334,42 @@ private:
         return static_cast<GLsizei>(count);
     }
 
+    /// Skinning rides in a buffer of its own, bound only when the mesh has
+    /// it. Terrain, grass and trees never pay for the attributes.
+    void upload_skinning(const MeshData& mesh) {
+        skinned_ = mesh.skinned();
+        if (!skinned_) {
+            glDisableVertexAttribArray(5);
+            glDisableVertexAttribArray(6);
+            return;
+        }
+        static_assert(std::is_standard_layout_v<SkinningVertex>);
+        glBindBuffer(GL_ARRAY_BUFFER, skinning_buffer_.get());
+        glBufferData(
+            GL_ARRAY_BUFFER,
+            static_cast<GLsizeiptr>(mesh.skinning.size() * sizeof(SkinningVertex)),
+            mesh.skinning.data(),
+            GL_STATIC_DRAW);
+        glEnableVertexAttribArray(5);
+        // Integer attribute, not a normalised float: a joint index of 12 has
+        // to arrive as 12.
+        glVertexAttribIPointer(
+            5, 4, GL_UNSIGNED_SHORT, sizeof(SkinningVertex),
+            reinterpret_cast<void*>(offsetof(SkinningVertex, joints)));
+        glEnableVertexAttribArray(6);
+        glVertexAttribPointer(
+            6, 4, GL_FLOAT, GL_FALSE, sizeof(SkinningVertex),
+            reinterpret_cast<void*>(offsetof(SkinningVertex, weights)));
+    }
+
     VertexArray vertex_array_;
     Buffer vertex_buffer_;
     Buffer index_buffer_;
     Buffer instance_buffer_;
+    Buffer skinning_buffer_;
     GLsizei index_count_{};
     GLsizei instance_count_{1};
+    bool skinned_{};
 };
 
 [[nodiscard]] GLenum primitive_topology(PrimitiveTopology topology) {
@@ -844,6 +878,8 @@ enum class StandardUniform : std::size_t {
     wind_direction,
     surface_wetness,
     viewport_size,
+    joints,
+    joint_count,
     sun_view_projection,
     sun_view_projections,
     shadow_cascade_splits,
@@ -877,6 +913,8 @@ constexpr std::array standard_uniform_names{
     "uWindDirection",
     "uSurfaceWetness",
     "uViewportSize",
+    "uJoints",
+    "uJointCount",
     "uSunViewProjection",
     "uSunViewProjections[0]",
     "uShadowCascadeSplits[0]",
@@ -980,6 +1018,15 @@ public:
         const auto units = std::min(vertex_units, fragment_units);
         max_sampled_textures_ = units > 0 ? static_cast<std::uint32_t>(units) : 0;
 
+        // A skinning palette is a plain uniform array, so how many joints
+        // fit is whatever the vertex stage has room for after everything
+        // else. Reserving a quarter of the budget leaves ample space for the
+        // frame's own matrices and still clears a humanoid rig.
+        GLint vertex_components{};
+        glGetIntegerv(GL_MAX_VERTEX_UNIFORM_COMPONENTS, &vertex_components);
+        const auto affordable = vertex_components / 4 / 16;
+        max_skinning_joints_ = affordable > 0 ? static_cast<std::uint32_t>(affordable) : 0;
+
         try {
             shadow_map_.emplace();
             shadows_available_ = shadow_map_->complete() && max_sampled_textures_ > 1;
@@ -997,6 +1044,7 @@ public:
             .wireframe = true,
             // One unit is reserved for the shadow map.
             .max_sampled_textures = max_sampled_textures_ > 0 ? max_sampled_textures_ - 1 : 0,
+            .max_skinning_joints = max_skinning_joints_,
             .directional_shadows = shadows_available_,
             .shadow_map_resolution = shadow_map_resolution,
         };
@@ -1127,6 +1175,22 @@ public:
                 viewport_location,
                 static_cast<float>(frame_.framebuffer_width),
                 static_cast<float>(frame_.framebuffer_height));
+        }
+
+        const auto joint_location = pipeline.standard_uniform(StandardUniform::joints);
+        if (joint_location >= 0 && !packet.joints.empty()) {
+            const auto count = std::min<std::size_t>(packet.joints.size(), max_skinning_joints_);
+            glUniformMatrix4fv(
+                joint_location,
+                static_cast<GLsizei>(count),
+                GL_FALSE,
+                packet.joints.data()->data());
+        }
+        const auto joint_count_location = pipeline.standard_uniform(StandardUniform::joint_count);
+        if (joint_count_location >= 0) {
+            glUniform1i(
+                joint_count_location,
+                static_cast<GLint>(std::min<std::size_t>(packet.joints.size(), max_skinning_joints_)));
         }
 
         matrix(StandardUniform::sun_view_projection, frame_.sun_view_projection);
@@ -1291,6 +1355,7 @@ private:
     }
 
     std::uint32_t max_sampled_textures_{};
+    std::uint32_t max_skinning_joints_{};
     std::optional<ShadowMap> shadow_map_;
     bool shadows_available_{};
     bool in_shadow_pass_{};

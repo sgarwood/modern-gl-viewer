@@ -41,10 +41,40 @@ then advances using the engine's injectable monotonic `Clock`, which makes tests
 that entity's complete render transform. Animation and physics bindings are mutually exclusive,
 preventing tick order from silently deciding which subsystem wins.
 
-This first slice provides runtime playback and root-transform animation only. It does not yet skin
-mesh vertices. A later skeletal-rendering slice will add weighted joint attributes, inverse bind
-poses, joint palettes, GPU buffers, and skinned shader support. Blending, layers, events, and an
-offline glTF/FBX conversion workflow also remain future work.
+## Skinning
+
+Meshes are skinned. `GltfLoader` reads a rigged glTF -- OBJ cannot express a skeleton at all --
+and produces an `ImportedSkin` beside the geometry, holding one inverse bind matrix and one
+**name** per joint.
+
+Names, not indices. A mesh and a skeleton are normally converted by different tools and have no
+reason to order their joints alike; `Engine::bind_skin` resolves the skin's joints against the
+skeleton's by name, once, at bind time, and refuses a skin naming a joint the skeleton lacks.
+Matching by index instead gives a character that animates almost correctly, which is far harder to
+diagnose than one that does not animate at all.
+
+Each frame the engine multiplies every joint's model matrix by its inverse bind and hands the
+result to the renderer as that renderable's palette. The product is the identity at the rest pose,
+which is the single most useful invariant to assert when wiring skinning up: a character that is
+mangled before it has been animated has this wrong.
+
+Skinning influences live in a stream of their own rather than widening `Vertex`, because almost
+nothing in a golf course is skinned and terrain, grass, trees and leaves would otherwise each pay
+twenty bytes a vertex for data they never use. The backend binds them to attributes 5 and 6, and
+only when the mesh has them.
+
+The palette is a plain uniform array, so its size is bounded by the vertex stage's uniform budget.
+The backend reports what it can take as `RenderBackendCapabilities::max_skinning_joints`,
+reserving a quarter of the budget, which clears a humanoid rig comfortably.
+
+Blending, layers, events, and inverse kinematics remain future work, as does attaching equipment
+to a joint -- though the palette that needs is now published.
+
+## Converting assets
+
+`-DMGV_BUILD_ANIMATION_TOOLS=ON` builds Ozz's `gltf2ozz` from the dependency already fetched. It is
+off by default: a runtime build has no use for an offline converter. See
+[`docs/characters.md`](characters.md) for where to source a character and what its licence allows.
 
 ## Example
 

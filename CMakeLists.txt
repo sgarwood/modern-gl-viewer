@@ -396,6 +396,7 @@ if(BUILD_TESTING)
 
     add_executable(mgv_tests
         tests/animation/animation_system_test.cpp
+        tests/animation/skinning_test.cpp
         tests/bounds_test.cpp
         tests/camera_test.cpp
         tests/camera_controller_test.cpp

@@ -86,6 +86,9 @@ struct RenderBackendCapabilities final {
     ClipSpaceConvention clip_space;
     bool wireframe{};
     std::uint32_t max_sampled_textures{16};
+    /// How many skinning matrices a shader can be given at once. Zero means
+    /// the backend cannot skin.
+    std::uint32_t max_skinning_joints{};
     /// Whether the backend can render a directional shadow map. A backend
     /// that cannot simply never has a shadow pass driven against it.
     bool directional_shadows{};
@@ -116,6 +119,9 @@ struct DrawPacket final {
     /// Inverse transpose of `model`, in the upper-left 3x3 block, which keeps
     /// normals perpendicular under non-uniform scale.
     Mat4 normal_matrix{identity_matrix};
+    /// Skinning matrices, one per joint, for a mesh carrying a skinning
+    /// stream. Empty for everything else, which is almost everything.
+    std::span<const Mat4> joints{};
     std::span<const SampledTextureBinding> textures{};
     std::span<const ColorBinding> colors{};
 };

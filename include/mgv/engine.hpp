@@ -3,6 +3,7 @@
 #include "mgv/animation/animation_system.hpp"
 #include "mgv/golf/shot_model.hpp"
 #include "mgv/hardware/launch_monitor.hpp"
+#include "mgv/imported_model.hpp"
 #include "mgv/input.hpp"
 #include "mgv/network/network_service.hpp"
 #include "mgv/physics/physics_world.hpp"
@@ -172,6 +173,19 @@ public:
     [[nodiscard]] animation::AnimationPlayerId bind_animation(
         EntityId entity,
         animation::AnimationClipId clip);
+    /// Deforms an entity's mesh by an animation player's skeleton.
+    ///
+    /// The skin's joints are matched to the skeleton's **by name**. A mesh
+    /// and a skeleton are usually converted by different tools and have no
+    /// reason to agree on joint order; matching by index instead gives a
+    /// character that animates almost correctly, which is far harder to
+    /// diagnose than one that does not animate at all.
+    ///
+    /// Throws if the skin names a joint the skeleton does not have.
+    void bind_skin(
+        EntityId entity,
+        animation::AnimationPlayerId player,
+        const ImportedSkin& skin);
     void remove(EntityId entity);
     /// Replaces an entity's geometry in place, keeping its material,
     /// transform, physics binding, and identity. Returns false if the

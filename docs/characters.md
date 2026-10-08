@@ -87,7 +87,12 @@ individually.
 
 ## What is missing in this codebase
 
-In the order they have to happen.
+**Items 1, 2, 3 and 4 below are now done.** A rigged glTF loads, its
+influences reach the vertex stage, the palette is published, and
+`skinned.vert` blends it. What remains of this list is the record of what it
+took.
+
+In the order they had to happen.
 
 ### 1. A skinned mesh importer
 

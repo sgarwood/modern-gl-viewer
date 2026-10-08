@@ -3,9 +3,13 @@
 #include "mgv/transform.hpp"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <span>
+#include <string>
+#include <vector>
 
 namespace mgv::animation {
 
@@ -60,6 +64,31 @@ public:
     [[nodiscard]] bool contains(AnimationPlayerId player) const noexcept;
     [[nodiscard]] PlaybackState state(AnimationPlayerId player) const;
     [[nodiscard]] Transform root_transform(AnimationPlayerId player) const;
+
+    /// The clip a player is playing.
+    [[nodiscard]] AnimationClipId clip_of(AnimationPlayerId player) const;
+
+    /// Number of joints in a clip's skeleton.
+    [[nodiscard]] std::size_t joint_count(AnimationClipId clip) const;
+
+    /// The skeleton's joint names, in skeleton order.
+    ///
+    /// A mesh's skin indexes its own joint list, which has no reason to be
+    /// ordered the way the skeleton is -- the two are usually converted by
+    /// different tools. Names are what the two are matched on.
+    [[nodiscard]] std::vector<std::string> joint_names(AnimationClipId clip) const;
+
+    /// Writes the player's current joint matrices, in model space, into
+    /// `out`, and returns how many were written.
+    ///
+    /// The runtime has always computed these; it simply did not publish
+    /// them, and `root_transform` returned one of them. Multiplied by a
+    /// mesh's inverse bind matrices they become the skinning palette.
+    ///
+    /// Fills a caller's buffer rather than returning one, because this is
+    /// read every frame for every animated character and a vector per
+    /// character per frame is a waste nobody needs.
+    std::size_t joint_matrices(AnimationPlayerId player, std::span<Mat4> out) const;
 
 private:
     struct Impl;

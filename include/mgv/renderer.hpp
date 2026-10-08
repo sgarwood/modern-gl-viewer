@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <vector>
 
 namespace mgv {
@@ -60,6 +61,9 @@ public:
     /// so this changes the geometry of every one of them. Returns false if
     /// the backend cannot update geometry in place.
     bool update_mesh(RenderableId id, const MeshData& mesh);
+    /// Sets the skinning matrices a renderable is deformed by this frame.
+    /// Passing an empty span returns it to rigid.
+    void set_renderable_joints(RenderableId id, std::span<const Mat4> joints);
     [[nodiscard]] Transform renderable_transform(RenderableId id) const;
     void set_camera(Camera camera) override;
     [[nodiscard]] Camera camera() const override;

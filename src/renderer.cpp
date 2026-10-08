@@ -233,6 +233,7 @@ struct GpuRenderable final {
     Mat4 normal_matrix{};
     std::vector<SampledTextureBinding> textures;
     std::vector<ColorBinding> colors;
+    std::vector<Mat4> joints;
     BoundingSphere local_bounds;
     bool translucent{};
     bool visible{true};
@@ -416,6 +417,7 @@ std::vector<RenderableId> Renderer::set_scene(Scene scene) {
             .normal_matrix = normal_matrix_of(renderable.transform().matrix()),
             .textures = std::move(gpu_texture_bindings),
             .colors = std::move(gpu_color_bindings),
+            .joints = {},
             .local_bounds = gpu_mesh.bounds,
             .translucent = renderable.material_instance()->material()->pipeline().blending.enabled,
             .visible = renderable.visible(),
@@ -479,6 +481,14 @@ bool Renderer::update_mesh(RenderableId id, const MeshData& mesh) {
     // them culls the new mesh against the old one's extent.
     found->local_bounds = calculate_bounds(mesh).sphere;
     return true;
+}
+
+void Renderer::set_renderable_joints(RenderableId id, std::span<const Mat4> joints) {
+    const auto found = std::ranges::find(impl_->renderables, id, &GpuRenderable::id);
+    if (found == impl_->renderables.end()) {
+        throw std::out_of_range{"Unknown renderable identifier"};
+    }
+    found->joints.assign(joints.begin(), joints.end());
 }
 
 Transform Renderer::renderable_transform(RenderableId id) const {
@@ -610,6 +620,7 @@ void Renderer::render(const Frame& frame) {
             .model_view_projection = multiply(view_projection, renderable.model_matrix),
             .model = renderable.model_matrix,
             .normal_matrix = renderable.normal_matrix,
+            .joints = renderable.joints,
             .textures = renderable.textures,
             .colors = renderable.colors,
         });

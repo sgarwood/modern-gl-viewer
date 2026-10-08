@@ -20,11 +20,35 @@ namespace mgv {
 
 namespace {
 
+[[nodiscard]] Mat4 multiply(const Mat4& lhs, const Mat4& rhs) {
+    Mat4 result{};
+    for (std::size_t column = 0; column < 4; ++column) {
+        for (std::size_t row = 0; row < 4; ++row) {
+            for (std::size_t inner = 0; inner < 4; ++inner) {
+                result[column * 4 + row] += lhs[inner * 4 + row] * rhs[column * 4 + inner];
+            }
+        }
+    }
+    return result;
+}
+
 class SteadyClock final : public Clock {
 public:
     [[nodiscard]] time_point now() const noexcept override {
         return std::chrono::steady_clock::now();
     }
+};
+
+/// A skin, with its joints already resolved against a skeleton.
+///
+/// Resolved once at bind time rather than every frame: matching names is a
+/// string comparison per joint, and a character has dozens of them.
+struct EntitySkin final {
+    /// For each of the skin's joints, where that joint sits in the
+    /// skeleton.
+    std::vector<std::size_t> skeleton_indices;
+    std::vector<Mat4> inverse_bind_matrices;
+    std::size_t skeleton_joints{};
 };
 
 struct EntityRecord final {
@@ -33,6 +57,7 @@ struct EntityRecord final {
     Transform transform;
     std::optional<physics::BodyId> body;
     std::optional<animation::AnimationPlayerId> animation_player;
+    std::optional<EntitySkin> skin{};
 };
 
 constexpr std::size_t maximum_network_events_per_tick{1'024};
@@ -284,6 +309,34 @@ void drain_commands() {
         }
     }
 
+    /// Recomputes the skinning palettes of every skinned entity and hands
+    /// them to the renderer.
+    ///
+    /// The multiplication is joint model matrix times inverse bind: the
+    /// first takes the joint from its rest pose to where the animation put
+    /// it, the second takes a vertex from model space into that joint's rest
+    /// frame. Doing it here rather than in the shader means it is done once
+    /// per joint instead of once per vertex.
+    void synchronize_skins() {
+        for (auto& entity : entities) {
+            if (!entity.skin || !entity.animation_player) {
+                continue;
+            }
+            auto& skin = *entity.skin;
+            pose_.assign(skin.skeleton_joints, Mat4{});
+            const auto written = animation_system.joint_matrices(*entity.animation_player, pose_);
+            palette_.assign(skin.inverse_bind_matrices.size(), identity_matrix);
+            for (std::size_t joint = 0; joint < skin.skeleton_indices.size(); ++joint) {
+                const auto source = skin.skeleton_indices[joint];
+                if (source >= written) {
+                    continue;
+                }
+                palette_[joint] = multiply(pose_[source], skin.inverse_bind_matrices[joint]);
+            }
+            renderer.set_renderable_joints(entity.renderable, palette_);
+        }
+    }
+
     void synchronize_animation() {
         for (auto& entity : entities) {
             if (!entity.animation_player) {
@@ -305,6 +358,9 @@ void drain_commands() {
     std::mutex commands_mutex;
 
     std::vector<EntityRecord> entities;
+    /// Scratch, reused every frame so a character costs no allocation.
+    std::vector<Mat4> pose_;
+    std::vector<Mat4> palette_;
     std::unique_ptr<network::NetworkEventSource> network_events;
     std::unique_ptr<NetworkEventDecoder> network_decoder;
     Clock::time_point started_at;
@@ -436,6 +492,35 @@ bool Engine::update_mesh(EntityId entity, const MeshData& mesh) {
     return impl_->renderer.update_mesh(impl_->find(entity).renderable, mesh);
 }
 
+void Engine::bind_skin(
+    EntityId entity,
+    animation::AnimationPlayerId player,
+    const ImportedSkin& skin) {
+    auto& record = impl_->find(entity);
+    if (skin.joint_names.size() != skin.inverse_bind_matrices.size()) {
+        throw std::invalid_argument{
+            "A skin needs one inverse bind matrix for each of its joints"};
+    }
+
+    const auto clip = impl_->animation_system.clip_of(player);
+    const auto skeleton = impl_->animation_system.joint_names(clip);
+
+    EntitySkin bound;
+    bound.skeleton_joints = skeleton.size();
+    bound.inverse_bind_matrices = skin.inverse_bind_matrices;
+    bound.skeleton_indices.reserve(skin.joint_names.size());
+    for (const auto& name : skin.joint_names) {
+        const auto found = std::ranges::find(skeleton, name);
+        if (found == skeleton.end()) {
+            throw std::invalid_argument{
+                "Skeleton has no joint named \"" + name + "\" that the skin requires"};
+        }
+        bound.skeleton_indices.push_back(
+            static_cast<std::size_t>(std::distance(skeleton.begin(), found)));
+    }
+    record.skin = std::move(bound);
+}
+
 void Engine::remove(EntityId entity) {
     const auto found = std::ranges::find(impl_->entities, entity, &EntityRecord::id);
     if (found == impl_->entities.end()) {
@@ -515,6 +600,7 @@ void Engine::tick(Viewport viewport) {
     impl_->last_tick_seconds = elapsed;
     impl_->animation_system.advance(animation::AnimationDuration{elapsed});
     impl_->synchronize_animation();
+    impl_->synchronize_skins();
 
     impl_->physics_world.simulate(physics::Duration{elapsed});
     impl_->synchronize_physics();

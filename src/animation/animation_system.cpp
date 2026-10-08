@@ -279,4 +279,45 @@ Transform AnimationSystem::root_transform(AnimationPlayerId player) const {
     return impl_->find(player).root;
 }
 
+AnimationClipId AnimationSystem::clip_of(AnimationPlayerId player) const {
+    return impl_->find(player).clip;
+}
+
+std::size_t AnimationSystem::joint_count(AnimationClipId clip) const {
+    return static_cast<std::size_t>(impl_->find(clip).skeleton.num_joints());
+}
+
+std::vector<std::string> AnimationSystem::joint_names(AnimationClipId clip) const {
+    const auto& skeleton = impl_->find(clip).skeleton;
+    std::vector<std::string> names;
+    names.reserve(static_cast<std::size_t>(skeleton.num_joints()));
+    for (const auto* name : skeleton.joint_names()) {
+        names.emplace_back(name == nullptr ? "" : name);
+    }
+    return names;
+}
+
+std::size_t AnimationSystem::joint_matrices(
+    AnimationPlayerId player,
+    std::span<Mat4> out) const {
+    const auto& found = impl_->find(player);
+    const auto count = std::min(found.models.size(), out.size());
+    for (std::size_t joint = 0; joint < count; ++joint) {
+        // Ozz stores a 4x4 as four SIMD columns; the renderer wants sixteen
+        // floats in the same column-major order, so this is a straight copy
+        // column by column.
+        const auto& source = found.models[joint];
+        auto& target = out[joint];
+        for (std::size_t column = 0; column < 4; ++column) {
+            alignas(16) std::array<float, 4> values{};
+            ozz::math::StorePtrU(
+                (&source.cols[0])[column], values.data());
+            for (std::size_t row = 0; row < 4; ++row) {
+                target[column * 4 + row] = values[row];
+            }
+        }
+    }
+    return count;
+}
+
 } // namespace mgv::animation
