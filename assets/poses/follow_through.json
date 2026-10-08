@@ -1,0 +1,136 @@
+{
+  "name": "follow-through",
+  "note": "Directions are in the rig's model space, expressed in the pose's own frame: up is +Z and the body has turned to face where the ball went, which these take as +Y. The golfer's own left is therefore -X, and behind them is -Y. Writing them in the rest frame instead is what put the hands in front of the face on the first attempt.",
+  "aims": [
+    {
+      "joint": "Skeleton_torso_joint_1",
+      "child": "Skeleton_torso_joint_2",
+      "direction": [
+        0.04,
+        -0.1,
+        1.0
+      ],
+      "twist_degrees": 46.0
+    },
+    {
+      "joint": "Skeleton_torso_joint_2",
+      "child": "torso_joint_3",
+      "direction": [
+        0.05,
+        -0.13,
+        1.0
+      ],
+      "twist_degrees": 24.0
+    },
+    {
+      "joint": "torso_joint_3",
+      "child": "Skeleton_neck_joint_1",
+      "direction": [
+        0.04,
+        -0.14,
+        1.0
+      ],
+      "twist_degrees": 28.0
+    },
+    {
+      "joint": "Skeleton_neck_joint_1",
+      "child": "Skeleton_neck_joint_2",
+      "direction": [
+        0.0,
+        0.26,
+        0.97
+      ],
+      "twist_degrees": 8.0
+    },
+    {
+      "joint": "Skeleton_arm_joint_L__4_",
+      "child": "Skeleton_arm_joint_L__3_",
+      "direction": [
+        -0.58,
+        0.36,
+        -0.12
+      ]
+    },
+    {
+      "joint": "Skeleton_arm_joint_L__3_",
+      "child": "Skeleton_arm_joint_L__2_",
+      "direction": [
+        -0.12,
+        -0.38,
+        0.92
+      ]
+    },
+    {
+      "joint": "Skeleton_arm_joint_R",
+      "child": "Skeleton_arm_joint_R__2_",
+      "direction": [
+        -0.64,
+        0.44,
+        0.42
+      ]
+    },
+    {
+      "joint": "Skeleton_arm_joint_R__2_",
+      "child": "Skeleton_arm_joint_R__3_",
+      "direction": [
+        -0.08,
+        -0.18,
+        0.98
+      ]
+    },
+    {
+      "joint": "leg_joint_L_1",
+      "child": "leg_joint_L_2",
+      "direction": [
+        -0.1,
+        0.02,
+        -0.99
+      ]
+    },
+    {
+      "joint": "leg_joint_L_2",
+      "child": "leg_joint_L_3",
+      "direction": [
+        -0.02,
+        0.03,
+        -1.0
+      ]
+    },
+    {
+      "joint": "leg_joint_L_3",
+      "child": "leg_joint_L_5",
+      "direction": [
+        0.0,
+        0.88,
+        -0.47
+      ]
+    },
+    {
+      "joint": "leg_joint_R_1",
+      "child": "leg_joint_R_2",
+      "direction": [
+        0.16,
+        0.2,
+        -0.97
+      ]
+    },
+    {
+      "joint": "leg_joint_R_2",
+      "child": "leg_joint_R_3",
+      "direction": [
+        0.06,
+        -0.22,
+        -0.97
+      ]
+    },
+    {
+      "joint": "leg_joint_R_3",
+      "child": "leg_joint_R_5",
+      "direction": [
+        0.02,
+        -0.62,
+        -0.78
+      ]
+    }
+  ]
+}

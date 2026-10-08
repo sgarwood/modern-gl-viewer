@@ -133,6 +133,42 @@ A linear blend over four weights, applied before the model matrix, in a
 `skinned.vert` sitting alongside the existing shaders. The fragment side is
 unchanged: a skinned character lights exactly like anything else.
 
+## Authoring a pose
+
+A pose is an animation with one key, so the runtime needs nothing new to
+play one. What was missing was a way to write one down.
+
+`-DMGV_BUILD_ANIMATION_TOOLS=ON` builds `mgv_pose_author`, which reads a
+skeleton and a description and writes a one-key clip:
+
+```sh
+./build/tools/mgv_pose_author skeleton.ozz assets/poses/follow_through.json finish.ozz
+```
+
+Each instruction aims one bone along a direction **in model space**, then
+twists it about itself. Model space because a rig's local joint axes are
+whatever its exporter felt like -- CesiumMan's spine runs along its parent's
+-X -- and guessing them is how an afternoon disappears. Twist because aiming
+a bone leaves rotation about its own length undetermined, and for a golf
+finish that rotation is most of the pose: the separation between open hips
+and a more open chest is the whole shape.
+
+Two things that cost time, recorded so they do not again:
+
+- **Directions are in the finished frame, not the rest frame.** The body has
+  turned to face the target, so the golfer's own left is no longer the rig's
+  left. Writing the arms in the rest frame put the hands in front of the
+  face.
+- **Accumulated rotations must include each joint's rest rotation**, not
+  just the aim applied on top of it. Leaving it out gives every joint below
+  the root the wrong parent frame, and the error compounds down the chain
+  into what looks exactly like a slouch.
+
+Hand-authoring reaches a recognisable posture quickly and a convincing one
+slowly. For a swing proper, retarget motion capture -- see the CMU database
+above -- and keep this for the static poses a round needs: addressing,
+crouching at the cup, standing at the range finder.
+
 ## Suggested order
 
 Do **3** first, on its own. It is small, it is self-contained, and it lets a

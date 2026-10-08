@@ -330,6 +330,17 @@ if(MGV_BUILD_QT_APP)
     qt_finalize_executable(mgv_qt)
 endif()
 
+if(MGV_BUILD_ANIMATION_TOOLS)
+    # Authors a static pose as a one-key Ozz animation. Content tooling, so
+    # it rides with the importer rather than with the runtime.
+    add_executable(mgv_pose_author tools/pose/pose_author.cpp)
+    target_compile_features(mgv_pose_author PRIVATE cxx_std_20)
+    target_include_directories(mgv_pose_author PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(mgv_pose_author PRIVATE
+        ozz_animation ozz_animation_offline ozz_base)
+endif()
+
 if(MGV_BUILD_CAPTURE_TOOL)
     add_executable(mgv_capture src/qt/capture_main.cpp)
     target_compile_features(mgv_capture PRIVATE cxx_std_20)
