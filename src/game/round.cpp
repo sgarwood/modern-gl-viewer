@@ -1,5 +1,7 @@
 #include "mgv/game/round.hpp"
 
+#include "mgv/compass.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -117,13 +119,7 @@ RoundEvent Round::toggle_range_finder(const RoundObservation& observation) {
 
 float Round::aim_bearing_degrees(Vec3 ball) const {
     const auto hole = impl_->hole_position();
-    const auto across_x = hole.x - ball.x;
-    const auto across_z = hole.z - ball.z;
-    if (std::abs(across_x) < 1.0e-5F && std::abs(across_z) < 1.0e-5F) {
-        return 0.0F;
-    }
-    constexpr auto radians_to_degrees = 57.29577951F;
-    return std::atan2(across_x, -across_z) * radians_to_degrees;
+    return direction_to_bearing({hole.x - ball.x, 0.0F, hole.z - ball.z});
 }
 
 std::optional<Vec3> Round::sight_direction() const {

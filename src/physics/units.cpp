@@ -1,5 +1,6 @@
 #include "mgv/physics/units.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -91,5 +92,35 @@ Impulse::Impulse(Vec3 newton_seconds) : newton_seconds_{newton_seconds} {
 }
 
 const Vec3& Impulse::newton_seconds() const noexcept { return newton_seconds_; }
+
+float air_density(
+    float temperature_celsius,
+    float pressure_pascals,
+    float relative_humidity) noexcept {
+    // Specific gas constants, in J/(kg K).
+    constexpr float dry_air = 287.058F;
+    constexpr float water_vapour = 461.495F;
+    constexpr float absolute_zero_celsius = -273.15F;
+
+    const auto kelvin = std::max(temperature_celsius - absolute_zero_celsius, 1.0F);
+    const auto pressure = std::max(pressure_pascals, 0.0F);
+    const auto humidity = std::clamp(relative_humidity, 0.0F, 1.0F);
+
+    // Tetens' approximation for the saturation vapour pressure of water. Its
+    // denominator vanishes near -237 C and the exponential runs away beyond
+    // that, so the temperature it is evaluated at is held to a range water
+    // actually exists over. Clamping the result before scaling by humidity
+    // also keeps a zero humidity from meeting an infinity and producing a
+    // NaN, which is how a nonsense temperature used to take the whole
+    // simulation with it.
+    const auto tetens_celsius = std::clamp(temperature_celsius, -80.0F, 100.0F);
+    const auto saturation = std::min(
+        610.78F * std::exp(17.27F * tetens_celsius / (tetens_celsius + 237.3F)),
+        pressure);
+    const auto vapour = humidity * saturation;
+
+    // Dalton: the partial pressures add, and each gas has its own constant.
+    return (pressure - vapour) / (dry_air * kelvin) + vapour / (water_vapour * kelvin);
+}
 
 } // namespace mgv::physics

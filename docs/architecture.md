@@ -97,6 +97,8 @@ same code.
 
 ### 4. `Engine::Impl` is a god object
 
+*(The air-density part of this is now done — see the note at the end.)*
+
 Eighteen members spanning rendering, physics, animation, networking,
 hardware, input, command queueing, entity storage and the wet trail. Lifting
 the round out removed a hundred and twenty lines of it; there is more.
@@ -153,8 +155,26 @@ authored outside the engine's own translation unit.
 1. Passes as data, with graph-owned transient targets. Unblocks the visual
    roadmap and tames the largest file.
 2. Component tables plus a sparse identifier map. Fixes (2) and (3) together.
-3. Move air density into `mgv::physics`.
+3. ~~Move air density into `mgv::physics`.~~ Done; see below.
 4. An event bus, when there is a second consumer.
+
+## Done since writing this
+
+**Air density, and what pulling on it turned up.** The weather command did
+more than compute density badly. It took the pressure as sea level
+regardless of where the round was played, which discards the several percent
+of carry that altitude is worth. It derived turf wetness from temperature --
+colder than fifteen degrees meant soaking -- while `WeatherCondition` was
+already carrying a measured `turf_wetness` and an `is_raining` the command
+had no field for. And it open-coded the compass convention a third time,
+after the sun and the shot model.
+
+`physics::air_density` now takes temperature, pressure and humidity and
+applies Dalton's law over Tetens' saturation curve, so humid air comes out
+*less* dense than dry air, which is the opposite of what most people expect
+and is tested for that reason. `mgv::bearing_to_direction` is the one place
+the convention is written down, and the sun, the wind and shot aiming all
+go through it.
 
 ## Sources
 

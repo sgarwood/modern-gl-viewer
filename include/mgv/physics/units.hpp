@@ -89,4 +89,24 @@ private:
     Vec3 newton_seconds_{};
 };
 
+/// Standard atmospheric pressure at sea level, in pascals.
+inline constexpr float standard_sea_level_pressure = 101'325.0F;
+
+/// Density of air, in kilograms per cubic metre.
+///
+/// Carry distance is roughly proportional to it, so this is not a detail: a
+/// course a mile up plays several percent longer than the same course at the
+/// coast, and that difference comes entirely from this function. Taking the
+/// pressure as sea level regardless of where the round is played throws that
+/// away.
+///
+/// `relative_humidity` runs 0 to 1. Humid air is *less* dense than dry air at
+/// the same temperature and pressure, because a water molecule is lighter
+/// than the nitrogen and oxygen it displaces -- which is the opposite of what
+/// most people expect, and worth the few lines it costs to get right.
+[[nodiscard]] float air_density(
+    float temperature_celsius,
+    float pressure_pascals = standard_sea_level_pressure,
+    float relative_humidity = 0.0F) noexcept;
+
 } // namespace mgv::physics

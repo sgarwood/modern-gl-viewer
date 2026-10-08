@@ -54,9 +54,18 @@ struct SetEntityTransformCommand final {
 
 
 struct SetWeatherCommand final {
-    float temperature_c;
-    float wind_speed_mps;
-    float wind_direction_deg;
+    float temperature_c{};
+    float wind_speed_mps{};
+    /// Compass bearing the wind blows *towards*, degrees clockwise from -Z.
+    float wind_direction_deg{};
+    /// Station pressure, in pascals. Carry distance depends on air density
+    /// and air density depends on this, so a course at altitude plays several
+    /// percent longer than the same course at the coast.
+    float pressure_pa{physics::standard_sea_level_pressure};
+    /// Relative humidity, 0 to 1.
+    float relative_humidity{};
+    /// How wet the turf is, 0 to 1. Observed, not guessed from temperature.
+    float turf_wetness{};
 };
 
 struct SetEntityVelocityCommand final {

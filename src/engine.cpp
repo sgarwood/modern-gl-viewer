@@ -3,6 +3,7 @@
 #include "mgv/engine.hpp"
 
 #include "mgv/camera_controller.hpp"
+#include "mgv/compass.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -190,17 +191,17 @@ struct Engine::Impl final {
                     renderer.set_renderable_transform(entity.renderable, entity.transform);
                 
                 } else if constexpr (std::is_same_v<Command, SetWeatherCommand>) {
-                    float temp_k = value.temperature_c + 273.15f;
-                    float rho = 101325.0f / (287.058f * temp_k);
-                    physics_world.set_air_density(rho);
-                    
-                    float rad = value.wind_direction_deg * (3.14159265f / 180.0f);
-                    float vx = value.wind_speed_mps * std::sin(rad);
-                    float vz = -value.wind_speed_mps * std::cos(rad);
-                    physics_world.set_wind(physics::LinearVelocity{Vec3{vx, 0.0f, vz}});
-                    
-                    float wetness = (value.temperature_c < 15.0f) ? 0.8f : 0.0f; 
-                    physics_world.set_wetness(wetness);
+                    physics_world.set_air_density(physics::air_density(
+                        value.temperature_c, value.pressure_pa, value.relative_humidity));
+
+                    const auto heading = bearing_to_direction(value.wind_direction_deg);
+                    physics_world.set_wind(physics::LinearVelocity{Vec3{
+                        heading.x * value.wind_speed_mps,
+                        0.0F,
+                        heading.z * value.wind_speed_mps,
+                    }});
+
+                    physics_world.set_wetness(std::clamp(value.turf_wetness, 0.0F, 1.0F));
                 } else if constexpr (std::is_same_v<Command, ApplyEntityImpulseCommand>) {
                     const auto& entity = find(value.entity);
                     if (!entity.body) {

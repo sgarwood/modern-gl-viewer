@@ -1,5 +1,7 @@
 #include "mgv/lighting.hpp"
 
+#include "mgv/compass.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -24,13 +26,13 @@ Vec3 normalized_light_direction(Vec3 direction) noexcept {
 }
 
 Vec3 sun_direction_from_angles(float azimuth_degrees, float elevation_degrees) noexcept {
-    const auto azimuth = azimuth_degrees * degrees_to_radians;
     const auto elevation = elevation_degrees * degrees_to_radians;
     const auto horizontal = std::cos(elevation);
+    const auto bearing = bearing_to_direction(azimuth_degrees);
     return normalized_light_direction({
-        horizontal * std::sin(azimuth),
+        bearing.x * horizontal,
         std::sin(elevation),
-        -horizontal * std::cos(azimuth),
+        bearing.z * horizontal,
     });
 }
 
