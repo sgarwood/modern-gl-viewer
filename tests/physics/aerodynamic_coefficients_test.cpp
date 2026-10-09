@@ -84,3 +84,14 @@ TEST_CASE("spin ratio is surface speed over flight speed") {
     // finite with it.
     CHECK(mgv::physics::spin_ratio(0.0F, 300.0F, ball_radius) == 0.0F);
 }
+
+TEST_CASE("a canopy adds drag in proportion to how dense it is") {
+    CHECK(mgv::physics::canopy_drag_coefficient(0.0F) == 0.0F);
+    CHECK(mgv::physics::canopy_drag_coefficient(-1.0F) == 0.0F);
+    CHECK(mgv::physics::canopy_drag_coefficient(0.8F) ==
+          Catch::Approx(mgv::physics::canopy_drag_coefficient(0.4F) * 2.0F));
+    // Enough to dominate a ball's ordinary drag, which is what makes the
+    // middle of a tree somewhere a ball does not come out of.
+    CHECK(mgv::physics::canopy_drag_coefficient(0.8F) >
+          mgv::physics::drag_coefficient(0.1F, 150'000.0F) * 5.0F);
+}

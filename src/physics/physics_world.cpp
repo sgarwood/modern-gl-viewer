@@ -1,4 +1,3 @@
-#include <iostream>
 #include "mgv/physics/physics_world.hpp"
 
 #include "mgv/physics/aerodynamics.hpp"
@@ -274,46 +273,67 @@ public:
             Vec3 v_body = body.velocity_.metres_per_second();
             Vec3 v_wind = wind_.metres_per_second();
             
-            // Check Foliage Wakes
-            bool inside_foliage = false;
-            float current_density = 0.0f;
-            for (const auto& vol : foliage_volumes_) {
-                // Check if in wake (simplified: if we are downwind (Z > vol.max.z) and within X/Y bounds)
-                // For this slice, just assume wind blows along Z axis.
-                // Wake zone extends 20 meters behind the tree.
-                if (body.position_.metres().x >= vol.min.x && body.position_.metres().x <= vol.max.x &&
-                    body.position_.metres().y >= vol.min.y && body.position_.metres().y <= vol.max.y) {
-                    
-                    if (body.position_.metres().z >= vol.min.z && body.position_.metres().z <= vol.max.z) {
-                        inside_foliage = true;
-                        current_density = vol.density;
-                        // Inside tree: wind drops to 20%
-                        v_wind = scaled(v_wind, 0.2f);
-                    } else if (body.position_.metres().z > vol.max.z && body.position_.metres().z < vol.max.z + 20.0f) {
-                        // Wake recovery
-                        float dist = body.position_.metres().z - vol.max.z;
-                        float recovery = 0.2f + 0.8f * (dist / 20.0f);
-                        v_wind = scaled(v_wind, recovery);
-                        
-                        // Add turbulence (von Karman vortex)
-                        v_wind.x += std::sin(dist * 2.0f) * 1.5f;
-                    }
+            // Shelter, and the drag of passing through a canopy.
+            //
+            // Neither depends on which way the wind happens to be blowing,
+            // which is what the previous version assumed: it compared the
+            // ball against the volume's Z bounds and called that downwind,
+            // so a crosswind sheltered nothing and a headwind sheltered the
+            // wrong side of the tree.
+            //
+            // What is gone with it is a probabilistic branch strike that
+            // drew on the sine of the ball's own z coordinate, teleported
+            // the velocity when it fired, and printed THWACK to standard
+            // output from inside the solver. A ball through a canopy now
+            // simply loses speed to it, continuously and repeatably, which
+            // is both nearer the truth and something a test can state.
+            float canopy_density = 0.0F;
+            const auto wind_speed = length(wind_.metres_per_second());
+            const auto wind_direction = wind_speed > 0.0F
+                ? scaled(Vec3{wind_.metres_per_second().x, 0.0F,
+                              wind_.metres_per_second().z},
+                         1.0F / wind_speed)
+                : Vec3{0.0F, 0.0F, 0.0F};
+            for (const auto& volume : foliage_volumes_) {
+                const auto at = body.position_.metres();
+                if (at.y < volume.min.y || at.y > volume.max.y) {
+                    continue;
                 }
-            }
-            
-            if (inside_foliage && length(v_body) > 1.0f) {
-                // Probabilistic branch collision
-                float chance = current_density * length(v_body) * 0.01f;
-                // Deterministic pseudo-random based on position
-                float roll = std::abs(std::sin(body.position_.metres().z * 100.0f));
-                if (roll < chance) {
-                    // Deflect!
-                    body.velocity_ = LinearVelocity{Vec3{v_body.x * 0.2f, -std::abs(v_body.y) * 0.5f, v_body.z * 0.2f}};
-                    std::cout << "[PHYSICS] THWACK! Ball hit a tree branch!" << std::endl;
-                    v_body = body.velocity_.metres_per_second();
+                if (at.x >= volume.min.x && at.x <= volume.max.x &&
+                    at.z >= volume.min.z && at.z <= volume.max.z) {
+                    canopy_density = std::max(canopy_density, volume.density);
+                    // Inside the crown the air is nearly still.
+                    v_wind = scaled(v_wind, 0.2F);
+                    continue;
                 }
+                if (wind_speed <= 0.0F) {
+                    continue;
+                }
+                // Downwind, measured along the wind. The wake recovers over
+                // twenty metres; across the wind it is no wider than the
+                // crown that cast it.
+                const Vec3 centre{
+                    (volume.min.x + volume.max.x) * 0.5F,
+                    (volume.min.y + volume.max.y) * 0.5F,
+                    (volume.min.z + volume.max.z) * 0.5F,
+                };
+                const Vec3 offset{at.x - centre.x, 0.0F, at.z - centre.z};
+                const auto along = dot(offset, wind_direction);
+                constexpr float wake_length = 20.0F;
+                if (along <= 0.0F || along > wake_length) {
+                    continue;
+                }
+                const auto across =
+                    length(subtract(offset, scaled(wind_direction, along)));
+                const auto crown_radius = std::max(
+                    (volume.max.x - volume.min.x) * 0.5F,
+                    (volume.max.z - volume.min.z) * 0.5F);
+                if (across > crown_radius) {
+                    continue;
+                }
+                v_wind = scaled(v_wind, 0.2F + (0.8F * (along / wake_length)));
             }
-            
+
             Vec3 v_air = subtract(v_body, v_wind);
             float v_air_len = length(v_air);
             
@@ -341,8 +361,9 @@ public:
                 const float reynolds = reynolds_number(v_air_len, r, rho);
 
                 // 1. Drag
-                const float drag_factor =
-                    -0.5F * rho * drag_coefficient(ratio, reynolds) * A * v_air_len / mass;
+                const auto drag = drag_coefficient(ratio, reynolds) +
+                    canopy_drag_coefficient(canopy_density);
+                const float drag_factor = -0.5F * rho * drag * A * v_air_len / mass;
                 a_aero = add(a_aero, scaled(v_air, drag_factor));
 
                 // 2. Magnus effect

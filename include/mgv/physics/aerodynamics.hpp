@@ -64,6 +64,19 @@ inline constexpr float air_dynamic_viscosity = 1.81e-5F;
 /// adding spin to an already spinning ball does comparatively little.
 [[nodiscard]] float lift_coefficient(float spin_ratio) noexcept;
 
+/// The drag a canopy adds to a ball inside it, as a coefficient.
+///
+/// Leaves and twigs take energy out of anything passing through them, and a
+/// ball that clips the outside of a crown should come out slower rather than
+/// somewhere else. Continuous in the density so that the edge of a canopy
+/// costs little and the middle of one costs a great deal.
+///
+/// The three is a judgement, not a measurement. Nobody has handed us a
+/// number for a golf ball through a hornbeam, and the figure that matters is
+/// the one that makes a ball into the middle of a tree drop rather than
+/// carry; it is stated here, once, rather than buried in the solver.
+[[nodiscard]] float canopy_drag_coefficient(float density) noexcept;
+
 /// The rate at which spin bleeds off, per second.
 ///
 /// Smits and Smith measured the spin-down of a ball in flight as

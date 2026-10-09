@@ -50,6 +50,10 @@ float lift_coefficient(float spin_ratio) noexcept {
     return 0.54F * std::pow(spin_ratio, 0.4F);
 }
 
+float canopy_drag_coefficient(float density) noexcept {
+    return density > 0.0F ? density * 3.0F : 0.0F;
+}
+
 float spin_decay_rate(float speed, float radius, float air_density) noexcept {
     if (speed <= 0.0F || radius <= 0.0F || air_density <= 0.0F) {
         return 0.0F;
