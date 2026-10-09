@@ -72,6 +72,7 @@ struct CourseCharacter final {
     /// The clip played when a shot worth watching is struck. Optional: with
     /// none, the character simply keeps idling through the swing.
     std::filesystem::path follow_through;
+    std::filesystem::path walk;
     /// Where the character stands, in the ground plane.
     Vec2 position{};
     /// Compass bearing it faces, degrees.
@@ -181,6 +182,7 @@ struct CourseSession final {
     /// Its idle and follow-through clips.
     std::optional<animation::AnimationClipId> idle_clip{};
     std::optional<animation::AnimationClipId> follow_through_clip{};
+    std::optional<animation::AnimationClipId> walk_clip{};
     /// The round being played, and the ground it walks over. Held by shared
     /// pointer because a session is passed around by value and the round
     /// holds a reference to its ground.

@@ -91,8 +91,8 @@ struct RoundRules final {
     float follow_through_distance{4.6F};
     /// Eye height above the ground, in metres.
     float eye_height{1.62F};
-    /// How far behind the ball the player stands to address it.
-    float stance_distance{2.6F};
+    /// How far behind the ball the player stands to address it (5ft).
+    float stance_distance{1.524F};
     /// How long the walk to the ball takes, in seconds.
     float walk_duration{4.0F};
     /// How long the camera lingers over the cup, in seconds.
