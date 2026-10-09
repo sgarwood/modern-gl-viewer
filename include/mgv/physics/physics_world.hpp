@@ -17,6 +17,26 @@ struct PhysicsConfiguration final {
     /// to switch it off in the same breath as gravity.
     float air_density{1.225F};
     std::size_t maximum_substeps{8};
+    /// Below this speed, and for `sleep_delay`, a body is taken to have come
+    /// to rest and stops integrating, in m/s.
+    ///
+    /// Not a cosmetic optimisation: a resting body re-penetrates the ground
+    /// by `g dt^2` every step, and the correction that pushes it back out
+    /// runs along the contact normal. On a slope that normal is tilted, so
+    /// each push moves the body a fraction of a millimetre downhill, and a
+    /// ball left on a green walks a couple of centimetres a second with its
+    /// velocity reading exactly zero throughout. Friction cannot answer that,
+    /// because there is no velocity for friction to oppose.
+    ///
+    /// Deliberately an order of magnitude under the speed a round calls at
+    /// rest, and held for long enough that a ball a slope *can* keep rolling
+    /// never qualifies: anything gravity is still accelerating is through
+    /// this speed in a fraction of the delay.
+    float sleep_linear_speed{0.01F};
+    /// The same for spin, in rad/s. Set to the rate a golf ball rolling at
+    /// `sleep_linear_speed` turns at, so the two conditions agree.
+    float sleep_angular_speed{0.5F};
+    Duration sleep_delay{0.5F};
 };
 
 

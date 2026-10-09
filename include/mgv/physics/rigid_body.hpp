@@ -103,6 +103,11 @@ public:
     [[nodiscard]] float inverse_inertia() const noexcept;
     [[nodiscard]] float restitution() const noexcept;
     [[nodiscard]] const TerrainMaterial& material() const noexcept;
+    /// Whether the body has come to rest and stopped integrating.
+    ///
+    /// Exposed because it is the honest answer to "has the ball stopped",
+    /// and cheaper to trust than a speed threshold applied from outside.
+    [[nodiscard]] bool sleeping() const noexcept;
 
 private:
     friend class PhysicsWorldImpl;
@@ -116,6 +121,9 @@ private:
     Mass mass_;
     float restitution_{};
     TerrainMaterial material_{};
+    bool sleeping_{};
+    /// How long it has been under the sleep thresholds, in seconds.
+    float still_seconds_{};
 };
 
 } // namespace mgv::physics

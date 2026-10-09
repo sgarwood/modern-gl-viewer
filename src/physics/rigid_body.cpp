@@ -118,5 +118,6 @@ float RigidBody::inverse_mass() const noexcept {
 
 float RigidBody::restitution() const noexcept { return restitution_; }
 const TerrainMaterial& RigidBody::material() const noexcept { return material_; }
+bool RigidBody::sleeping() const noexcept { return sleeping_; }
 
 } // namespace mgv::physics

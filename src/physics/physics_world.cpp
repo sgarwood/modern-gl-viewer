@@ -92,10 +92,13 @@ public:
         }
         body.velocity_ = linear;
         body.angular_velocity_ = angular;
+        rouse(body);
     }
 
     void set_position(BodyId id, Position position) {
-        find_mutable(id).position_ = position;
+        auto& body = find_mutable(id);
+        body.position_ = position;
+        rouse(body);
     }
 
     void set_static_collider(BodyId id, Collider collider, Position position) {
@@ -105,6 +108,16 @@ public:
         }
         body.collider_ = std::move(collider);
         body.position_ = position;
+        // The ground has moved out from under whatever was lying on it. The
+        // streamed collision patch is rebuilt from the same analytic surface,
+        // so the heights should agree to a fraction of a millimetre -- but
+        // "should" is doing a lot of work in that sentence, and a ball left
+        // asleep over a patch that disagreed would hang in the air.
+        for (auto& sleeper : bodies) {
+            if (sleeper.motion_ == MotionType::dynamic) {
+                rouse(sleeper);
+            }
+        }
     }
 
     
@@ -208,6 +221,7 @@ public:
 
     void apply_impulse(BodyId id, Impulse impulse) {
         auto& body = find_mutable(id);
+        rouse(body);
         if (body.motion_ == MotionType::static_body) {
             return;
         }
@@ -222,7 +236,7 @@ public:
     void integrate(float time_step) {
         const auto gravity = configuration.gravity.metres_per_second_squared();
         for (auto& body : bodies) {
-            if (body.motion_ == MotionType::static_body) {
+            if (body.motion_ == MotionType::static_body || body.sleeping_) {
                 continue;
             }
             
@@ -540,6 +554,42 @@ public:
             scaled(cross(slowed, arm), 1.0F / (ball_radius * ball_radius)))};
     }
 
+    /// Whether this body is taking part in the simulation this step.
+    [[nodiscard]] static bool integrating(const RigidBody& body) {
+        return body.motion_ == MotionType::dynamic && !body.sleeping_;
+    }
+
+    static void rouse(RigidBody& body) {
+        body.sleeping_ = false;
+        body.still_seconds_ = 0.0F;
+    }
+
+    void update_sleep(float time_step) {
+        for (auto& body : bodies) {
+            if (body.motion_ == MotionType::static_body || body.sleeping_) {
+                continue;
+            }
+            const auto still =
+                length(body.velocity_.metres_per_second()) <=
+                    configuration.sleep_linear_speed &&
+                length(body.angular_velocity_.radians_per_second()) <=
+                    configuration.sleep_angular_speed;
+            if (!still) {
+                body.still_seconds_ = 0.0F;
+                continue;
+            }
+            body.still_seconds_ += time_step;
+            if (body.still_seconds_ >= configuration.sleep_delay.seconds()) {
+                body.sleeping_ = true;
+                // Zeroed rather than left as they were: whatever remains is
+                // under the threshold by definition, and a round asking
+                // whether the ball has stopped deserves a straight answer.
+                body.velocity_ = LinearVelocity{};
+                body.angular_velocity_ = AngularVelocity{};
+            }
+        }
+    }
+
     void step(float time_step) {
         integrate(time_step);
         collisions.clear();
@@ -560,10 +610,25 @@ public:
                         .second = second.id(),
                         .contact = *contact,
                     });
-                    resolve(first, second, *contact, time_step);
+                    // Something moving has arrived against something that had
+                    // stopped, so the sleeper is part of the simulation again.
+                    if (integrating(first) && second.sleeping_) {
+                        rouse(second);
+                    } else if (integrating(second) && first.sleeping_) {
+                        rouse(first);
+                    }
+                    // With neither body integrating there is nothing to
+                    // resolve, and resolving anyway is exactly the creep this
+                    // is here to stop: the correction pushes a resting ball
+                    // along the contact normal, which on a slope is downhill,
+                    // every step for as long as it lies there.
+                    if (integrating(first) || integrating(second)) {
+                        resolve(first, second, *contact, time_step);
+                    }
                 }
             }
         }
+        update_sleep(time_step);
     }
 
     PhysicsConfiguration configuration;
