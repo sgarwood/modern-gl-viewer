@@ -132,6 +132,56 @@ zero for a static body and for any dynamic body that is not a sphere; a box
 needs a tensor, and one number would make it spin wrongly rather than not at
 all. The only dynamic body in this project is a ball.
 
+## What the ball can hit
+
+Sphere, box, heightmap and an upright capsule. The capsule is what a trunk
+and a flagstick are; it stands on the Y axis rather than taking a free one,
+because nothing on this course leans and an arbitrary axis would cost a
+rotation on every contact. Knowing the axis makes the closest point on it
+the sphere's own height clamped to the segment, so the contact normal comes
+out horizontal wherever up the trunk a ball strikes.
+
+Every tree on the hole carries one around its bole. The bole only: a
+broadleaf divides into limbs a ball flies between as often as not, and what
+a crown does is the wind's business below. Its radius and height come from
+`tree_trunk`, which reads the same species profile the mesh is built from --
+derived separately the two would drift, and a ball would pass through one
+trunk and bounce off thin air beside the next. `primitives_test.cpp` checks
+the capsule stands inside the bark's own taper, which is the most that can
+be asked of one radius against a bole that swells at the base and narrows
+towards the crown.
+
+Bark's restitution, 0.35, is a judgement rather than a measurement. So is
+the drag a canopy adds. Both are written down where they are chosen.
+
+### Only the pairs that can touch
+
+Two pieces of scenery cannot move relative to one another, so only pairs
+holding a dynamic body are considered. Ninety trees make four thousand pairs
+and all but ninety of them are tree against tree; walking them all cost 5%
+of a 60 Hz budget with nothing happening, and 55% at three hundred trees.
+
+This is not a spatial broad phase -- a dynamic body is still compared
+against every static one -- but the quadratic term is gone, and one ball
+against a course's furniture is linear. A course with thousands of trees
+would want real partitioning.
+
+## Wind and foliage
+
+Wind is a uniform vector, reduced inside a foliage volume and in its wake.
+Downwind is measured along the wind, which it was not: the wake used to be
+tested against the volume's Z bounds, so it worked for a wind along +Z and
+for no other.
+
+A canopy also adds drag in proportion to its density, so a ball through the
+middle of a crown drops rather than carrying. That replaced a probabilistic
+branch strike drawn from the sine of the ball's own z coordinate, which
+printed to standard output when it fired.
+
+The course plants no foliage volumes yet -- only the GLFW demo does, one, by
+hand -- so the crowns do nothing until they are planted from the trees. That
+is the obvious next job here.
+
 ## Coming to rest
 
 A body that stays under `sleep_linear_speed` and `sleep_angular_speed` for
@@ -169,5 +219,7 @@ retuned, and `tests/physics/resting_test.cpp` states it.
 - **The second drag fall above Re = 200,000.** See above: it is why a driver
   carries short. Everything else in the flight model is inside a few per cent
   of measured tour trajectories.
-- **Wind as anything but a uniform vector,** apart from one hardcoded foliage
-  volume. No gradient with height, no gusts, no shelter from terrain.
+- **Wind gradients, gusts and shelter from terrain.** Wind is one vector for
+  the whole course, modified only by foliage volumes.
+- **Canopies on the course.** The trunks are solid; the crowns are not
+  planted. See above.
