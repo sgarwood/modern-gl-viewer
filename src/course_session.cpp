@@ -594,7 +594,25 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
         description.viewpoint.near_plane,
         description.viewpoint.far_plane);
     engine.set_camera(std::move(camera));
-    engine.set_environment(description.environment);
+    // The sun is where the site and the clock put it, not where the
+    // description asked for it.
+    auto environment = description.environment;
+    apply_site(environment, description.site);
+    engine.set_environment(environment);
+
+    // The air the ball flies through, from the site's elevation. Live weather
+    // replaces this the moment a service answers; until then the standard
+    // atmosphere at the right height beats sea level at the wrong one, and a
+    // course a thousand feet up played several percent short.
+    engine.enqueue(SetWeatherCommand{
+        .temperature_c = 15.0F,
+        .wind_speed_mps = description.environment.wind_speed,
+        .wind_direction_deg =
+            description.environment.wind_direction_radians * 180.0F / 3.14159265F,
+        .pressure_pa = physics::pressure_at_elevation(description.site.elevation_metres),
+        .relative_humidity = 0.5F,
+        .turf_wetness = description.environment.surface_wetness,
+    });
 
     std::optional<EntityId> character_entity;
     std::optional<animation::AnimationPlayerId> character_player;

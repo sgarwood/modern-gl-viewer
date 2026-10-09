@@ -93,6 +93,18 @@ Impulse::Impulse(Vec3 newton_seconds) : newton_seconds_{newton_seconds} {
 
 const Vec3& Impulse::newton_seconds() const noexcept { return newton_seconds_; }
 
+float pressure_at_elevation(
+    float elevation_metres,
+    float sea_level_pressure) noexcept {
+    // The standard atmosphere's troposphere, with its fixed lapse rate, which
+    // is where every golf course on earth is.
+    if (elevation_metres <= 0.0F) {
+        return sea_level_pressure;
+    }
+    return sea_level_pressure *
+        std::pow(1.0F - (2.25577e-5F * elevation_metres), 5.25588F);
+}
+
 float air_density(
     float temperature_celsius,
     float pressure_pascals,

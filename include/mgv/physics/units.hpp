@@ -104,6 +104,20 @@ inline constexpr float standard_sea_level_pressure = 101'325.0F;
 /// the same temperature and pressure, because a water molecule is lighter
 /// than the nitrogen and oxygen it displaces -- which is the opposite of what
 /// most people expect, and worth the few lines it costs to get right.
+/// Air pressure at an elevation, in pascals, by the barometric formula for
+/// the international standard atmosphere.
+///
+/// A weather service that reports a station pressure gives a better number
+/// than this -- it knows what the weather is doing -- and should be preferred.
+/// This is for when all that is known about a course is how high up it is,
+/// which is the usual case for a course nobody has asked a service about.
+///
+/// Denver, a mile up, comes out near 83 kPa against 101 at the coast, and
+/// that eighteen percent of air is most of why a ball carries further there.
+[[nodiscard]] float pressure_at_elevation(
+    float elevation_metres,
+    float sea_level_pressure = standard_sea_level_pressure) noexcept;
+
 [[nodiscard]] float air_density(
     float temperature_celsius,
     float pressure_pascals = standard_sea_level_pressure,
