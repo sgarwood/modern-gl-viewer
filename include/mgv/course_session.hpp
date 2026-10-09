@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mgv/course_site.hpp"
 #include "mgv/engine.hpp"
 #include "mgv/game/round.hpp"
 #include "mgv/lighting.hpp"
@@ -143,6 +144,11 @@ struct CourseSessionDescription final {
     std::optional<CourseCharacter> character;
     CourseViewpoint viewpoint;
     Environment environment;
+    /// Where on earth this hole is and when it is being played. The sun's
+    /// direction and the air's density both come from it, so the authored
+    /// `environment.sun.direction` is overwritten by it. Defaults to
+    /// Greenwich at sea level at midday.
+    CourseSite site;
     /// Where the ball is teed or lying, in the ground plane. Its height comes
     /// from the terrain, so it always starts resting on the surface.
     Vec2 ball_start{4.6F, -44.0F};

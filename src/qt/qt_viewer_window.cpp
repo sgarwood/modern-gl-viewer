@@ -19,19 +19,25 @@ namespace {
 
 } // namespace
 
-QtViewerWindow::QtViewerWindow(mgv::AssetPaths assets, QWidget* parent)
-    : QMainWindow{parent}, assets_{std::move(assets)} {
+QtViewerWindow::QtViewerWindow(
+    mgv::AssetPaths assets,
+    mgv::CourseConditions conditions,
+    QWidget* parent)
+    : QMainWindow{parent},
+      assets_{std::move(assets)},
+      conditions_{std::move(conditions)} {
     setWindowTitle("Modern GL Viewer — Engine");
-    viewer_ = new QtViewerWidget{assets_, this};
+    viewer_ = new QtViewerWidget{assets_, conditions_, this};
     setCentralWidget(viewer_);
     create_actions();
     statusBar()->showMessage("Arrow keys: orbit  |  +/−: zoom  |  Home/R: reset");
     resize(viewer_->sizeHint());
 }
 
-void QtViewerWindow::load_assets(mgv::AssetPaths assets) {
+void QtViewerWindow::load_assets(mgv::AssetPaths assets, mgv::CourseConditions conditions) {
     assets_ = std::move(assets);
-    viewer_->load_assets(assets_);
+    conditions_ = std::move(conditions);
+    viewer_->load_assets(assets_, conditions_);
 }
 
 void QtViewerWindow::create_actions() {
@@ -42,7 +48,7 @@ void QtViewerWindow::create_actions() {
             this, "Open OBJ", {}, "Wavefront OBJ (*.obj)");
         if (!selected.isEmpty()) {
             assets_.model = path_from(selected);
-            viewer_->load_assets(assets_);
+            viewer_->load_assets(assets_, conditions_);
         }
     });
 
@@ -52,7 +58,7 @@ void QtViewerWindow::create_actions() {
             this, "Open vertex shader", {}, "GLSL (*.vert *.glsl);;All files (*)");
         if (!selected.isEmpty()) {
             assets_.vertex_shader = path_from(selected);
-            viewer_->load_assets(assets_);
+            viewer_->load_assets(assets_, conditions_);
         }
     });
 
@@ -62,14 +68,14 @@ void QtViewerWindow::create_actions() {
             this, "Open fragment shader", {}, "GLSL (*.frag *.glsl);;All files (*)");
         if (!selected.isEmpty()) {
             assets_.fragment_shader = path_from(selected);
-            viewer_->load_assets(assets_);
+            viewer_->load_assets(assets_, conditions_);
         }
     });
 
     file_menu->addSeparator();
     auto* reload = file_menu->addAction("&Reload assets");
     connect(reload, &QAction::triggered, viewer_, [this] {
-        viewer_->load_assets(assets_);
+        viewer_->load_assets(assets_, conditions_);
     });
     auto* close = file_menu->addAction("&Close engine");
     connect(close, &QAction::triggered, this, &QWidget::close);

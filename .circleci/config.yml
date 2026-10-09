@@ -34,6 +34,45 @@ jobs:
     - run:
         name: Test
         command: ctest --test-dir build/ci --output-on-failure
+  build_qml_ubuntu:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    steps:
+    - checkout
+    - run:
+        name: Install build tools and Qt Quick
+        command: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+            build-essential ninja-build libgl1-mesa-dev libxkbcommon-dev \
+            qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools \
+            qml6-module-qtquick qml6-module-qtquick-controls \
+            qml6-module-qtquick-dialogs qml6-module-qtquick-layouts \
+            qml6-module-qtquick-templates qml6-module-qtquick-window \
+            qml6-module-qtqml-models qml6-module-qtqml-workerscript
+          # glad generates its loader at build time by running `python3 -m
+          # glad`, which needs Jinja2. Installed with pip rather than apt
+          # because CMake resolves python3 to the image's pyenv shim, and a
+          # dist-packages module would be invisible to it.
+          python3 -m pip install --disable-pip-version-check "Jinja2==3.1.6"
+    - run:
+        name: Configure
+        command: |
+          cmake -S . -B build/ci-qml -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTING=ON \
+            -DMGV_BUILD_GLFW_APP=OFF \
+            -DMGV_BUILD_QT_APP=OFF \
+            -DMGV_BUILD_QML_APP=ON \
+            -DPython_EXECUTABLE="$(command -v python3)" \
+            -DMGV_WARNINGS_AS_ERRORS=ON
+    - run:
+        name: Build
+        command: cmake --build build/ci-qml --parallel
+    - run:
+        name: Test
+        command: ctest --test-dir build/ci-qml --output-on-failure
   build_windows:
     machine:
       image: windows-server-2022-gui:2025.10.1
@@ -268,6 +307,7 @@ workflows:
   build_matrix:
     jobs:
     - build_ubuntu
+    - build_qml_ubuntu
     - build_windows
   macos_validation:
     when: << pipeline.parameters.run_macos >>

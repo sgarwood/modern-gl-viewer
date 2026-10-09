@@ -249,9 +249,183 @@ ApplicationWindow {
                         }
                     }
 
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 6
+                        implicitHeight: 1
+                        color: root.stroke
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text {
+                            text: "COURSE"
+                            color: root.ink
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: 1.3
+                        }
+                        Item { Layout.fillWidth: true }
+                        Button {
+                            text: "GREENWICH"
+                            flat: true
+                            onClicked: menuController.useGreenwich()
+                            contentItem: Text {
+                                text: parent.text
+                                color: root.muted
+                                font.pixelSize: 9
+                                font.weight: Font.DemiBold
+                                font.letterSpacing: 1.1
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        TextField {
+                            id: clubField
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 44
+                            enabled: menuController.hasClubDirectory
+                            placeholderText: menuController.hasClubDirectory
+                                             ? "UK golf club, or a county"
+                                             : "No course backend configured"
+                            text: menuController.clubQuery
+                            color: root.ink
+                            font.pixelSize: 13
+                            onTextChanged: menuController.clubQuery = text
+                            onAccepted: menuController.searchClubs()
+                            background: Rectangle {
+                                radius: 8
+                                color: "#0b1019"
+                                border.color: clubField.activeFocus ? root.accent : root.stroke
+                                border.width: 1
+                            }
+                        }
+
+                        Button {
+                            Layout.preferredWidth: 84
+                            Layout.preferredHeight: 44
+                            text: "SEARCH"
+                            enabled: menuController.hasClubDirectory
+                            onClicked: menuController.searchClubs()
+                            background: Rectangle {
+                                radius: 8
+                                color: parent.enabled
+                                       ? (parent.hovered ? "#252d3a" : "#1a202b")
+                                       : "#141922"
+                                border.color: root.stroke
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                color: parent.enabled ? root.ink : "#5b6373"
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                                font.letterSpacing: 1.0
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+                    }
+
+                    // Only present while there is something to choose from.
+                    // A permanently empty list reads as a broken search.
+                    Rectangle {
+                        Layout.fillWidth: true
+                        visible: menuController.clubResults.length > 0
+                        implicitHeight: Math.min(
+                            168, Math.max(44, menuController.clubResults.length * 56))
+                        radius: 10
+                        color: "#0b1019"
+                        border.color: root.stroke
+                        border.width: 1
+                        clip: true
+
+                        ListView {
+                            id: clubList
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            model: menuController.clubResults
+                            boundsBehavior: Flickable.StopAtBounds
+                            ScrollBar.vertical: ScrollBar { }
+
+                            delegate: ItemDelegate {
+                                required property int index
+                                required property string modelData
+
+                                width: clubList.width
+                                height: 56
+                                onClicked: menuController.selectClub(index)
+
+                                background: Rectangle {
+                                    color: parent.hovered ? "#19202b" : "transparent"
+                                }
+                                contentItem: ColumnLayout {
+                                    spacing: 2
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData
+                                        color: root.ink
+                                        font.pixelSize: 12
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        // Two clubs share a name often
+                                        // enough that the address is what
+                                        // tells them apart.
+                                        text: index < menuController.clubAddresses.length
+                                              ? menuController.clubAddresses[index] : ""
+                                        color: "#6f7787"
+                                        font.pixelSize: 9
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 3
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: menuController.siteName
+                            color: root.accent
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: menuController.siteSummary
+                            color: root.muted
+                            font.pixelSize: 10
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: menuController.weatherSummary
+                            color: root.muted
+                            font.pixelSize: 10
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: menuController.sunSummary
+                            color: root.muted
+                            font.pixelSize: 10
+                            elide: Text.ElideRight
+                        }
+                    }
+
                     Text {
                         Layout.fillWidth: true
-                        text: "The engine opens in its native rendering window. This menu remains available for rapid asset iteration."
+                        text: "The engine opens in its native rendering window. The course's elevation sets the air the ball flies through, and its latitude and hour set the sun."
                         color: "#6f7787"
                         font.pixelSize: 10
                         lineHeight: 1.25
@@ -271,7 +445,7 @@ ApplicationWindow {
             }
             Item { Layout.fillWidth: true }
             Text {
-                text: "OBJ  ·  CUSTOM SHADERS  ·  PHYSICS  ·  UDP"
+                text: "OBJ  ·  CUSTOM SHADERS  ·  PHYSICS  ·  LIVE COURSE CONDITIONS"
                 color: "#565e6d"
                 font.pixelSize: 9
                 font.letterSpacing: 1.5

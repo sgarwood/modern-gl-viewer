@@ -90,6 +90,8 @@ add_library(mgv_core
     src/primitives.cpp
     src/renderer.cpp
     src/runtime_paths.cpp
+    src/course_site.cpp
+    src/solar.cpp
     src/scene.cpp
     src/shader_loader.cpp
     src/texture.cpp
@@ -105,6 +107,7 @@ target_include_directories(mgv_core SYSTEM PRIVATE "${stb_SOURCE_DIR}")
 target_link_libraries(mgv_core PRIVATE mgv::project_warnings)
 
 add_library(mgv_physics
+    src/physics/aerodynamics.cpp
     src/physics/collider.cpp
     src/physics/collision_detector.cpp
     src/physics/physics_world.cpp
@@ -432,8 +435,15 @@ if(BUILD_TESTING)
         tests/physics/physics_world_test.cpp
         tests/physics/units_test.cpp
         tests/physics/aerodynamics_test.cpp
+        tests/physics/aerodynamic_coefficients_test.cpp
+        tests/physics/flight_test.cpp
+        tests/physics/foliage_test.cpp
+        tests/physics/spin_test.cpp
+        tests/physics/resting_test.cpp
         tests/renderer_test.cpp
         tests/runtime_paths_test.cpp
+        tests/course_site_test.cpp
+        tests/solar_test.cpp
         tests/scene_test.cpp
         tests/stl_loader_test.cpp
         tests/shader_loader_test.cpp

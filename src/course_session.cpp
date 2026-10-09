@@ -136,6 +136,21 @@ struct TreePlacement final {
     return placements;
 }
 
+/// The tree a species and variant index describe.
+///
+/// Shared, so that the tree a player sees and the trunk the ball hits are
+/// the same tree. Derived in two places they would drift, and a ball would
+/// pass through one trunk and bounce off thin air beside the next.
+[[nodiscard]] TreeDescription tree_of(TreeSpecies species, std::size_t variant) {
+    return {
+        .species = species,
+        .height = 9.5F + static_cast<float>(variant) * 2.1F,
+        .spread = 0.88F + static_cast<float>(variant) * 0.14F,
+        .seed = 17u + static_cast<unsigned int>(variant) * 311u +
+                static_cast<unsigned int>(species) * 7919u,
+    };
+}
+
 /// Where leaves have drifted.
 ///
 /// Leaves collect under and just downwind of the trees that shed them, so
@@ -376,13 +391,7 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
                 continue;
             }
 
-            auto mesh = make_tree({
-                .species = species,
-                .height = 9.5F + static_cast<float>(variant) * 2.1F,
-                .spread = 0.88F + static_cast<float>(variant) * 0.14F,
-                .seed = 17u + static_cast<unsigned int>(variant) * 311u +
-                        static_cast<unsigned int>(species) * 7919u,
-            });
+            auto mesh = make_tree(tree_of(species, variant));
             mesh.instances = std::move(instances);
 
             const auto palette = tree_palette(species);
@@ -577,6 +586,35 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
             .at(physics::Position{{0.0F, description.collision.backstop_height - 0.5F, 0.0F}})
             .build()));
 
+    // Trees the ball can hit. The bole only: a broadleaf divides into limbs
+    // that a ball flies between as often as not, and what the crown does to
+    // a shot is the wind's business rather than the solver's.
+    //
+    // Bark takes most of the pace off a ball. 0.35 is a judgement rather
+    // than a measurement -- unlike the turf, nobody has handed us a number
+    // for this -- but it is the difference between a ball dropping at the
+    // foot of the tree and one rebounding into the fairway.
+    for (const auto& tree : placements) {
+        const auto trunk = tree_trunk(tree_of(tree.species, tree.variant));
+        const auto radius = trunk.radius * tree.scale;
+        const auto bole = trunk.height * tree.scale;
+        static_cast<void>(engine.add_static_collider(
+            physics::RigidBodyBuilder{physics::Collider::capsule(
+                physics::Length{radius}, physics::Length{bole * 0.5F})}
+                .motion(physics::MotionType::static_body)
+                .at(physics::Position{{
+                    tree.position.x,
+                    tree.position.y + (bole * 0.5F),
+                    tree.position.z,
+                }})
+                .restitution(0.35F)
+                .material(physics::TerrainMaterial{
+                    .dynamic_friction = 0.6F,
+                    .rolling_resistance = 0.0F,
+                })
+                .build()));
+    }
+
     const auto on_terrain = [&description](Vec2 place, float height) {
         return Vec3{
             place.x,
@@ -594,7 +632,25 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
         description.viewpoint.near_plane,
         description.viewpoint.far_plane);
     engine.set_camera(std::move(camera));
-    engine.set_environment(description.environment);
+    // The sun is where the site and the clock put it, not where the
+    // description asked for it.
+    auto environment = description.environment;
+    apply_site(environment, description.site);
+    engine.set_environment(environment);
+
+    // The air the ball flies through, from the site's elevation. Live weather
+    // replaces this the moment a service answers; until then the standard
+    // atmosphere at the right height beats sea level at the wrong one, and a
+    // course a thousand feet up played several percent short.
+    engine.enqueue(SetWeatherCommand{
+        .temperature_c = 15.0F,
+        .wind_speed_mps = description.environment.wind_speed,
+        .wind_direction_deg =
+            description.environment.wind_direction_radians * 180.0F / 3.14159265F,
+        .pressure_pa = physics::pressure_at_elevation(description.site.elevation_metres),
+        .relative_humidity = 0.5F,
+        .turf_wetness = description.environment.surface_wetness,
+    });
 
     std::optional<EntityId> character_entity;
     std::optional<animation::AnimationPlayerId> character_player;

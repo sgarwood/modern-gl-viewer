@@ -142,6 +142,39 @@ struct Manifold final {
 }
 
 
+[[nodiscard]] std::optional<Manifold> sphere_capsule(
+    const SphereCollider& sphere,
+    Vec3 sphere_position,
+    const CapsuleCollider& capsule,
+    Vec3 capsule_position) {
+    // The capsule stands on Y, so the closest point on its axis is the
+    // sphere's own height clamped to the segment. Against a tree that makes
+    // the contact normal horizontal wherever the ball is up the trunk, which
+    // is what a ball coming off bark should do.
+    const auto half_height = capsule.half_height.metres();
+    const Vec3 closest{
+        capsule_position.x,
+        std::clamp(
+            sphere_position.y,
+            capsule_position.y - half_height,
+            capsule_position.y + half_height),
+        capsule_position.z,
+    };
+    const auto delta = subtract(closest, sphere_position);
+    const auto distance_squared = dot(delta, delta);
+    const auto combined_radius = sphere.radius.metres() + capsule.radius.metres();
+    if (distance_squared > combined_radius * combined_radius) {
+        return std::nullopt;
+    }
+    const auto distance = std::sqrt(distance_squared);
+    // Dead on the axis, which means inside the trunk: out sideways is the
+    // only sensible direction, and up or down would be worse than arbitrary.
+    const auto normal = distance > std::numeric_limits<float>::epsilon()
+        ? scaled(delta, 1.0F / distance)
+        : Vec3{1.0F, 0.0F, 0.0F};
+    return Manifold{.normal = normal, .penetration = combined_radius - distance};
+}
+
 [[nodiscard]] std::optional<Manifold> sphere_heightmap(
     const SphereCollider& sphere,
     Vec3 sphere_position,
@@ -235,6 +268,9 @@ std::optional<ContactManifold> DiscreteCollisionDetector::detect(
             manifold = sphere_sphere(*first_sphere, first_position, *second_sphere, second_position);
         } else if (const auto* second_box = std::get_if<BoxCollider>(&second_shape)) {
             manifold = sphere_box(*first_sphere, first_position, *second_box, second_position);
+        } else if (const auto* second_capsule = std::get_if<CapsuleCollider>(&second_shape)) {
+            manifold = sphere_capsule(
+                *first_sphere, first_position, *second_capsule, second_position);
         } else if (const auto* second_hm = std::get_if<HeightmapCollider>(&second_shape)) {
             manifold = sphere_heightmap(*first_sphere, first_position, *second_hm, second_position);
         }
@@ -244,6 +280,12 @@ std::optional<ContactManifold> DiscreteCollisionDetector::detect(
             if (manifold) manifold->normal = negate(manifold->normal);
         } else if (const auto* second_box = std::get_if<BoxCollider>(&second_shape)) {
             manifold = box_box(*first_box, first_position, *second_box, second_position);
+        }
+    } else if (const auto* first_capsule = std::get_if<CapsuleCollider>(&first_shape)) {
+        if (const auto* second_sphere = std::get_if<SphereCollider>(&second_shape)) {
+            manifold = sphere_capsule(
+                *second_sphere, second_position, *first_capsule, first_position);
+            if (manifold) manifold->normal = negate(manifold->normal);
         }
     } else if (const auto* first_hm = std::get_if<HeightmapCollider>(&first_shape)) {
         if (const auto* second_sphere = std::get_if<SphereCollider>(&second_shape)) {

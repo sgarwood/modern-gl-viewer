@@ -65,10 +65,16 @@ TEST_CASE("standard shot model turns a putter stroke into a rolling launch") {
     CHECK(velocity.y == Catch::Approx(0.0F));
     CHECK(velocity.z == Catch::Approx(-3.2F));
 
+    // Rolling, not checking: a ball travelling along -Z rolls forward about
+    // -X. Reversed, this is the backspin the full swing spins about, and the
+    // putt would skid instead of running.
     const auto spin = launch.angular_velocity.radians_per_second();
-    CHECK(spin.x == Catch::Approx(160.0F));
+    CHECK(spin.x == Catch::Approx(-160.0F));
     CHECK(spin.y == Catch::Approx(0.0F));
     CHECK(spin.z == Catch::Approx(0.0F));
+    // The no-slip condition, stated as the solver reads it: the surface of
+    // the ball is stationary where it touches the ground.
+    CHECK(velocity.z - spin.x * 0.02F == Catch::Approx(0.0F).margin(0.0001F));
 }
 
 TEST_CASE("standard shot model rejects impossible or non-finite measurements") {

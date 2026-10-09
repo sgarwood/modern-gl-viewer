@@ -110,11 +110,16 @@ struct Application::Impl final {
             std::make_unique<network::HttpBackendClient>("")
         );
         environment->on_weather_updated([this](const network::WeatherCondition& w) {
-            std::cout << "Callback executed on background thread!" << std::endl;
+            // All of it. Pressure, humidity and how wet the turf is were
+            // being dropped here, so a course played at sea level in dry air
+            // on a dry green however hard it was raining on it.
             engine->enqueue(SetWeatherCommand{
-                w.temperature_c,
-                w.wind_speed_mps,
-                w.wind_direction_deg
+                .temperature_c = w.temperature_c,
+                .wind_speed_mps = w.wind_speed_mps,
+                .wind_direction_deg = w.wind_direction_deg,
+                .pressure_pa = w.pressure_pascals,
+                .relative_humidity = w.relative_humidity,
+                .turf_wetness = w.turf_wetness,
             });
         });
         environment->start(1, std::chrono::seconds(60));

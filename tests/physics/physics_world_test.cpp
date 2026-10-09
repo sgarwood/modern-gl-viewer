@@ -77,6 +77,9 @@ TEST_CASE("physics world resolves penetration and restitution impulses") {
     mgv::physics::PhysicsConfiguration configuration;
     configuration.fixed_time_step = mgv::physics::Duration{0.01F};
     configuration.gravity = mgv::physics::Acceleration{{}};
+    // Vacuum: this is about the restitution impulse, and a one metre sphere pushes
+    // enough air aside to show up in the fourth decimal place.
+    configuration.air_density = 0.0F;
     mgv::physics::PhysicsWorld world{configuration};
     const auto floor = world.add_body(sphere(mgv::physics::MotionType::static_body, {}));
     const auto falling = world.add_body(
@@ -341,4 +344,50 @@ TEST_CASE("only a static body's collider may be replaced") {
         world.set_static_collider(
             mgv::physics::BodyId{9999}, flat_patch(4, 1.0F, 0.0F), mgv::physics::Position{}),
         std::out_of_range);
+}
+
+TEST_CASE("a raycast ranges a standing capsule") {
+    // What the range finder does to a tree. The trunk runs from the ground to
+    // three metres; the ray leaves at eye height and should come back with
+    // the distance to the near face of the bark.
+    mgv::physics::PhysicsConfiguration configuration;
+    configuration.gravity = mgv::physics::Acceleration{{}};
+    mgv::physics::PhysicsWorld world{configuration};
+    const auto trunk = world.add_body(
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::capsule(
+                mgv::physics::Length{0.18F}, mgv::physics::Length{1.5F})}
+            .motion(mgv::physics::MotionType::static_body)
+            .at(mgv::physics::Position{{5.0F, 1.5F, 0.0F}})
+            .build());
+
+    const auto hit = world.raycast(
+        mgv::physics::Position{{0.0F, 1.6F, 0.0F}}, {1.0F, 0.0F, 0.0F});
+
+    REQUIRE(hit);
+    CHECK(hit->body == trunk);
+    CHECK(hit->distance == Catch::Approx(4.82F).margin(0.001F));
+    CHECK(hit->normal.x == Catch::Approx(-1.0F));
+    CHECK(hit->normal.y == Catch::Approx(0.0F));
+
+    // Over the top of it, where an infinite cylinder would have reported a
+    // hit and a rangefinder would have read the distance to thin air.
+    CHECK_FALSE(world.raycast(
+        mgv::physics::Position{{0.0F, 6.0F, 0.0F}}, {1.0F, 0.0F, 0.0F}));
+}
+
+TEST_CASE("two overlapping static bodies are never a collision") {
+    // The invariant the pair culling rests on: scenery cannot move relative
+    // to other scenery, so those pairs are not considered at all. Trees are
+    // planted in stands and overlap each other's colliders routinely.
+    mgv::physics::PhysicsConfiguration configuration;
+    configuration.gravity = mgv::physics::Acceleration{{}};
+    mgv::physics::PhysicsWorld world{configuration};
+    static_cast<void>(world.add_body(sphere(mgv::physics::MotionType::static_body, {})));
+    static_cast<void>(
+        world.add_body(sphere(mgv::physics::MotionType::static_body, {0.5F, 0.0F, 0.0F})));
+
+    world.simulate(mgv::physics::Duration{1.0F / 60.0F});
+
+    CHECK(world.collisions().empty());
 }

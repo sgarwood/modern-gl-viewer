@@ -91,8 +91,23 @@ public:
     [[nodiscard]] const AngularVelocity& angular_velocity() const noexcept;
     [[nodiscard]] const Mass& mass() const noexcept;
     [[nodiscard]] float inverse_mass() const noexcept;
+    /// The reciprocal of the body's moment of inertia about its centre, in
+    /// reciprocal kilogram metres squared.
+    ///
+    /// Zero for a static body, and zero for any dynamic body that is not a
+    /// sphere. A single scalar is only honest for a sphere, whose inertia is
+    /// the same about every axis; a box needs a tensor, and giving it one
+    /// number would make it spin wrongly rather than not at all. The only
+    /// dynamic body in this project is a ball, so the restriction costs
+    /// nothing and the lie would have cost something.
+    [[nodiscard]] float inverse_inertia() const noexcept;
     [[nodiscard]] float restitution() const noexcept;
     [[nodiscard]] const TerrainMaterial& material() const noexcept;
+    /// Whether the body has come to rest and stopped integrating.
+    ///
+    /// Exposed because it is the honest answer to "has the ball stopped",
+    /// and cheaper to trust than a speed threshold applied from outside.
+    [[nodiscard]] bool sleeping() const noexcept;
 
 private:
     friend class PhysicsWorldImpl;
@@ -106,6 +121,9 @@ private:
     Mass mass_;
     float restitution_{};
     TerrainMaterial material_{};
+    bool sleeping_{};
+    /// How long it has been under the sleep thresholds, in seconds.
+    float still_seconds_{};
 };
 
 } // namespace mgv::physics

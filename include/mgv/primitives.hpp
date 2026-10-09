@@ -163,6 +163,23 @@ struct TreePalette final {
 
 [[nodiscard]] TreePalette tree_palette(TreeSpecies species) noexcept;
 
+/// The bole of a tree, as the physics needs it.
+///
+/// Taken from the same species proportions the mesh is built from, so the
+/// collider and the bark a player can see are the same object. Derived
+/// separately, they would drift, and a ball would pass through one tree and
+/// bounce off thin air beside the next.
+struct TreeTrunk final {
+    /// Radius of the bole, in metres.
+    float radius{};
+    /// How far up the bole is solid, in metres above the tree's base. Above
+    /// it is crown: a broadleaf divides into limbs the ball flies between,
+    /// and nothing here pretends to catch it.
+    float height{};
+};
+
+[[nodiscard]] TreeTrunk tree_trunk(const TreeDescription& description) noexcept;
+
 [[nodiscard]] MeshData make_tree(const TreeDescription& description);
 
 /// Builds a single grass blade of unit height, standing on the origin.
