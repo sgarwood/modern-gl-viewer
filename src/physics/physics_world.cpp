@@ -623,16 +623,43 @@ public:
     void step(float time_step) {
         integrate(time_step);
         collisions.clear();
-        for (std::size_t first_index = 0; first_index < bodies.size(); ++first_index) {
-            for (std::size_t second_index = first_index + 1;
-                 second_index < bodies.size();
-                 ++second_index) {
-                auto& first = bodies[first_index];
-                auto& second = bodies[second_index];
-                if (first.motion() == MotionType::static_body &&
-                    second.motion() == MotionType::static_body) {
+
+        // Only the pairs with a dynamic body in them. Two pieces of scenery
+        // cannot move relative to one another, so most of a course's pairs
+        // can never produce a contact: ninety trees make four thousand pairs
+        // and all but ninety of them are tree against tree.
+        //
+        // Walking them all anyway cost 5% of a 60 Hz budget with nothing
+        // happening, and 55% at three hundred trees, because the count is
+        // quadratic in a number that only grows as a course gains scenery.
+        //
+        // This is not a spatial broad phase -- a dynamic body is still
+        // compared against every static one -- but it removes the whole of
+        // the quadratic term, and one ball against a course's furniture is
+        // linear.
+        dynamic_indices.clear();
+        for (std::size_t index = 0; index < bodies.size(); ++index) {
+            if (bodies[index].motion() == MotionType::dynamic) {
+                dynamic_indices.push_back(index);
+            }
+        }
+
+        for (const auto dynamic_index : dynamic_indices) {
+            for (std::size_t other = 0; other < bodies.size(); ++other) {
+                if (other == dynamic_index) {
                     continue;
                 }
+                // A pair of dynamic bodies belongs to the lower-numbered of
+                // the two, so that it is resolved once rather than twice.
+                if (bodies[other].motion() == MotionType::dynamic &&
+                    other < dynamic_index) {
+                    continue;
+                }
+                // Kept in index order, because the contact normal runs from
+                // the first body to the second and half the solver depends
+                // on knowing which is which.
+                auto& first = bodies[std::min(dynamic_index, other)];
+                auto& second = bodies[std::max(dynamic_index, other)];
                 auto contact = collision_detector->detect(first, second);
                 if (contact) {
                     collisions.push_back({
@@ -665,6 +692,9 @@ public:
     std::unique_ptr<CollisionDetector> collision_detector;
     std::deque<RigidBody> bodies;
     std::vector<Collision> collisions;
+    /// Indices of the dynamic bodies, rebuilt each step. A member rather
+    /// than a local so that a step does not allocate.
+    std::vector<std::size_t> dynamic_indices;
     std::vector<FoliageVolume> foliage_volumes_;
     LinearVelocity wind_{};
     float air_density_{};

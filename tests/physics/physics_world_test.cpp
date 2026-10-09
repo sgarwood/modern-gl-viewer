@@ -375,3 +375,19 @@ TEST_CASE("a raycast ranges a standing capsule") {
     CHECK_FALSE(world.raycast(
         mgv::physics::Position{{0.0F, 6.0F, 0.0F}}, {1.0F, 0.0F, 0.0F}));
 }
+
+TEST_CASE("two overlapping static bodies are never a collision") {
+    // The invariant the pair culling rests on: scenery cannot move relative
+    // to other scenery, so those pairs are not considered at all. Trees are
+    // planted in stands and overlap each other's colliders routinely.
+    mgv::physics::PhysicsConfiguration configuration;
+    configuration.gravity = mgv::physics::Acceleration{{}};
+    mgv::physics::PhysicsWorld world{configuration};
+    static_cast<void>(world.add_body(sphere(mgv::physics::MotionType::static_body, {})));
+    static_cast<void>(
+        world.add_body(sphere(mgv::physics::MotionType::static_body, {0.5F, 0.0F, 0.0F})));
+
+    world.simulate(mgv::physics::Duration{1.0F / 60.0F});
+
+    CHECK(world.collisions().empty());
+}
