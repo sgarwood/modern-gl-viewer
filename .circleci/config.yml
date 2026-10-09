@@ -51,6 +51,11 @@ jobs:
             qml6-module-qtquick-dialogs qml6-module-qtquick-layouts \
             qml6-module-qtquick-templates qml6-module-qtquick-window \
             qml6-module-qtqml-models qml6-module-qtqml-workerscript
+          # glad generates its loader at build time by running `python3 -m
+          # glad`, which needs Jinja2. Installed with pip rather than apt
+          # because CMake resolves python3 to the image's pyenv shim, and a
+          # dist-packages module would be invisible to it.
+          python3 -m pip install --disable-pip-version-check "Jinja2==3.1.6"
     - run:
         name: Configure
         command: |
@@ -60,6 +65,7 @@ jobs:
             -DMGV_BUILD_GLFW_APP=OFF \
             -DMGV_BUILD_QT_APP=OFF \
             -DMGV_BUILD_QML_APP=ON \
+            -DPython_EXECUTABLE="$(command -v python3)" \
             -DMGV_WARNINGS_AS_ERRORS=ON
     - run:
         name: Build

@@ -17,6 +17,12 @@ request. `manual_prerelease` compiled it, but that workflow refuses to run on an
 apt install from `qt6-base-dev`, which is why it is a job of its own rather than a flag on the
 existing one.
 
+Any job that builds a frontend also needs Jinja2, because `glad` generates its OpenGL loader at
+build time by running `python3 -m glad`. It must be installed with pip and not with apt: CMake
+resolves `python3` to the CircleCI image's pyenv shim, which cannot see a module in the system
+`dist-packages`. `build_ubuntu` escapes this only because with every frontend off, glad is never
+fetched at all.
+
 It gates compilation, not correctness. `qmlcachegen` will reject a syntax error or a malformed
 object tree; it cannot tell whether a binding onto `menuController` resolves, because that is a
 context property injected at runtime. `qt_add_qml_module` also generates a `mgv_qml_qmllint`
