@@ -43,6 +43,10 @@ namespace {
     return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
+/// Below this relative surface speed a contact counts as rolling rather than
+/// sliding, in m/s.
+inline constexpr float slip_tolerance = 1.0e-3F;
+
 } // namespace
 
 class PhysicsWorldImpl final {
@@ -369,64 +373,171 @@ public:
                 second.velocity_.metres_per_second(), scaled(impulse, second_inverse_mass))};
         }
         
-        // Friction and Rolling Resistance (Tangential)
-        // Recalculate relative velocity after normal impulse
-        const auto new_relative_velocity = subtract(
-            second.velocity_.metres_per_second(),
-            first.velocity_.metres_per_second());
-        const auto v_normal = dot(new_relative_velocity, contact.normal());
-        const auto v_tangent = subtract(new_relative_velocity, scaled(contact.normal(), v_normal));
-        const float v_tangent_len = length(v_tangent);
-        
-        if (v_tangent_len > 0.001F) {
-            Vec3 tangent_dir = scaled(v_tangent, 1.0F / v_tangent_len);
-            
-            // Average dynamic friction
-            float mu = (first.material().dynamic_friction + second.material().dynamic_friction) * 0.5F;
-            
-            // Rolling resistance modifier
-            float rolling_res = std::max(first.material().rolling_resistance, second.material().rolling_resistance);
-            float sand_mod = std::max(first.material().sand_topdressing, second.material().sand_topdressing);
-            
-            // Dynamic Wetness System:
-            // 1. Skidding/Sliding: Water acts as a lubricant (reduces dynamic friction)
-            mu = mu * (1.0f - (wetness_ * 0.4f)); 
-            
-            // 2. Rolling: Water creates viscous drag (increases rolling resistance)
-            rolling_res = rolling_res * (1.0f + (wetness_ * 0.6f));
-            
-            mu += rolling_res + (sand_mod * 0.2F);
-            
-            // Bumpiness (Bobbles) adds micro-deflections to the tangent
-            float bumpiness = std::max(first.material().bumpiness, second.material().bumpiness);
-            if (bumpiness > 0.0F) {
-                // Slower putts are deflected more severely relative to their velocity
-                float deflection_mag = bumpiness * 0.05F / (v_tangent_len + 0.1F);
-                // Pseudo-random deflection based on position (deterministic)
-                float noise_z = std::sin(first.position_.metres().x * 100.0F) * deflection_mag;
-                tangent_dir = add(tangent_dir, {0.0F, 0.0F, noise_z});
-            }
-            
-            // Coulomb limit, as an impulse: the friction force a surface can
-            // sustain is mu times the normal load, over the step. Expressing
-            // it as mu * g * dt alone gives a velocity, not an impulse, and
-            // only happens to come out near the right number for a body that
-            // weighs what a golf ball weighs.
-            const auto load_impulse = mu * 9.81F * time_step / total_inverse_mass;
-            const auto friction_impulse_mag =
-                std::min(v_tangent_len / total_inverse_mass, load_impulse);
-            const auto friction_impulse = scaled(tangent_dir, friction_impulse_mag);
+        // Friction, and the spin it trades against.
+        //
+        // What matters at a contact is the velocity of the material at the
+        // contact point, not of the body's centre. A ball with backspin is
+        // dragging its underside forward across the turf *faster* than it is
+        // travelling, and that is the whole reason a struck approach shot
+        // stops where it lands. Solved on centre velocities alone, spin is a
+        // decoration: it bends the flight and then has no say in what
+        // happens on the ground.
+        const auto first_radius = sphere_radius(first.collider());
+        const auto second_radius = sphere_radius(second.collider());
+        // The normal runs from the first body to the second, so the contact
+        // lies a radius along it from the first centre and a radius back
+        // from the second.
+        const auto first_arm = scaled(contact.normal(), first_radius.value_or(0.0F));
+        const auto second_arm = scaled(contact.normal(), -second_radius.value_or(0.0F));
+        const auto surface_velocity = [](const RigidBody& body, Vec3 arm) {
+            return add(
+                body.velocity_.metres_per_second(),
+                cross(body.angular_velocity_.radians_per_second(), arm));
+        };
+        const auto contact_velocity = subtract(
+            surface_velocity(second, second_arm), surface_velocity(first, first_arm));
+        const auto contact_normal_speed = dot(contact_velocity, contact.normal());
+        const auto slip = subtract(
+            contact_velocity, scaled(contact.normal(), contact_normal_speed));
+        const auto slip_speed = length(slip);
 
-            // tangent_dir is the second body's tangential motion relative to
-            // the first, so friction drags the first along it and the second
-            // against it. Reversing these two drives the contact instead of
-            // retarding it: a ball sliding across level ground accelerates,
-            // and one resting on any slope runs away without bound.
-            first.velocity_ = LinearVelocity{add(
-                first.velocity_.metres_per_second(), scaled(friction_impulse, first_inverse_mass))};
-            second.velocity_ = LinearVelocity{subtract(
-                second.velocity_.metres_per_second(), scaled(friction_impulse, second_inverse_mass))};
+        // Friction and rolling resistance are no longer summed into one
+        // coefficient. They act at different times -- Coulomb friction while
+        // the contact slides, rolling resistance once it does not -- and
+        // adding them made a putt and a landing drive the same event.
+        float mu = (first.material().dynamic_friction + second.material().dynamic_friction) * 0.5F;
+        float rolling_resistance =
+            std::max(first.material().rolling_resistance, second.material().rolling_resistance);
+        const auto sand =
+            std::max(first.material().sand_topdressing, second.material().sand_topdressing);
+
+        // Water lubricates a sliding contact and thickens a rolling one, so
+        // it pulls the two in opposite directions.
+        mu *= 1.0F - (wetness_ * 0.4F);
+        rolling_resistance = rolling_resistance * (1.0F + (wetness_ * 0.6F)) + (sand * 0.2F);
+
+        // The load the surface reacts, as an impulse over this step: the
+        // weight it carries, times the step. Expressing the Coulomb limit as
+        // mu * g * dt alone gives a velocity rather than an impulse, and only
+        // happens to come out near the right number for a body that weighs
+        // what a golf ball weighs.
+        const auto load_impulse = 9.81F * time_step / total_inverse_mass;
+
+        bool rolling = slip_speed <= slip_tolerance;
+        if (!rolling) {
+            const auto tangent_dir = scaled(slip, 1.0F / slip_speed);
+            // The effective mass at the contact for a tangential impulse.
+            // The inertia terms are what split the slip between the centre
+            // and the spin -- five sevenths and two sevenths for a sphere --
+            // and leaving them out is what made spin inert on landing.
+            const auto angular_term = [&tangent_dir](const RigidBody& body, Vec3 arm) {
+                const auto moment = cross(arm, tangent_dir);
+                return body.inverse_inertia() * dot(moment, moment);
+            };
+            const auto tangential_inverse_mass = total_inverse_mass +
+                angular_term(first, first_arm) + angular_term(second, second_arm);
+            if (tangential_inverse_mass > 0.0F) {
+                const auto arresting_impulse = slip_speed / tangential_inverse_mass;
+                const auto limit = mu * load_impulse;
+                const auto impulse = scaled(tangent_dir, std::min(arresting_impulse, limit));
+
+                // tangent_dir is the second body's surface motion relative to
+                // the first, so friction drags the first along it and the
+                // second against it. Reversing these two drives the contact
+                // instead of retarding it: a ball sliding across level ground
+                // accelerates, and one resting on any slope runs away without
+                // bound.
+                first.velocity_ = LinearVelocity{add(
+                    first.velocity_.metres_per_second(), scaled(impulse, first_inverse_mass))};
+                second.velocity_ = LinearVelocity{subtract(
+                    second.velocity_.metres_per_second(), scaled(impulse, second_inverse_mass))};
+                first.angular_velocity_ = AngularVelocity{add(
+                    first.angular_velocity_.radians_per_second(),
+                    scaled(cross(first_arm, impulse), first.inverse_inertia()))};
+                second.angular_velocity_ = AngularVelocity{subtract(
+                    second.angular_velocity_.radians_per_second(),
+                    scaled(cross(second_arm, impulse), second.inverse_inertia()))};
+
+                // The surface could absorb the whole slip, so by the end of
+                // this step the contact is rolling and resistance takes over.
+                rolling = arresting_impulse <= limit;
+            }
         }
+
+        if (!rolling || rolling_resistance <= 0.0F) {
+            return;
+        }
+
+        // Rolling resistance: a couple opposing the spin, with the static
+        // friction that maintains the roll passing the deceleration on to the
+        // centre. For a solid sphere that works out at five sevenths of
+        // c * g, which is what lets a green's speed be stated in feet and
+        // checked against a stimpmeter rather than against this solver.
+        //
+        // Applied to the one dynamic sphere in the contact. On a golf course
+        // that is the ball against the ground, and two dynamic spheres
+        // rolling on each other is not a thing this game has.
+        RigidBody* ball = nullptr;
+        Vec3 arm{};
+        float ball_radius = 0.0F;
+        if (first.inverse_inertia() > 0.0F && second_inverse_mass <= 0.0F) {
+            ball = &first;
+            arm = first_arm;
+            ball_radius = *first_radius;
+        } else if (second.inverse_inertia() > 0.0F && first_inverse_mass <= 0.0F) {
+            ball = &second;
+            arm = second_arm;
+            ball_radius = *second_radius;
+        }
+        if (ball == nullptr) {
+            return;
+        }
+
+        const auto centre_velocity = ball->velocity_.metres_per_second();
+        const auto normal_speed = dot(centre_velocity, contact.normal());
+        const auto rolling_velocity = subtract(
+            centre_velocity, scaled(contact.normal(), normal_speed));
+        auto rolling_speed = length(rolling_velocity);
+        if (rolling_speed <= 0.0F) {
+            return;
+        }
+        auto direction = scaled(rolling_velocity, 1.0F / rolling_speed);
+
+        // A bobbled surface deflects a roll, and the slower the roll the more
+        // of the deflection shows -- which is why a putt dying at the hole
+        // wanders off its line and one hit firmly holds it. Deterministic in
+        // the ball's position, so a replayed shot replays.
+        const auto bumpiness = std::max(first.material().bumpiness, second.material().bumpiness);
+        if (bumpiness > 0.0F) {
+            const auto across = cross(contact.normal(), direction);
+            const auto deflection = bumpiness * 0.05F / (rolling_speed + 0.1F) *
+                std::sin(ball->position_.metres().x * 100.0F);
+            direction = add(direction, scaled(across, deflection));
+            const auto deflected_length = length(direction);
+            if (deflected_length > 0.0F) {
+                direction = scaled(direction, 1.0F / deflected_length);
+            }
+        }
+
+        // The share of the resistance that reaches the centre: the inertia
+        // term over the inertia and mass terms together, five sevenths for a
+        // solid sphere.
+        const auto inertia_term = ball->inverse_inertia() * ball_radius * ball_radius;
+        const auto reaching_centre = inertia_term / (ball->inverse_mass() + inertia_term);
+        rolling_speed -= std::min(
+            rolling_speed, rolling_resistance * 9.81F * reaching_centre * time_step);
+
+        const auto slowed = scaled(direction, rolling_speed);
+        ball->velocity_ = LinearVelocity{add(scaled(contact.normal(), normal_speed), slowed)};
+        // Spin follows the roll. A rolling ball's spin is not a free
+        // variable, and leaving it where it was while the centre slows
+        // re-introduces a slip for friction to undo next step. Spin about the
+        // normal is left alone: a ball can rotate like a top while it rolls,
+        // and that component is what cut spin on a putt becomes.
+        const auto spin_about_normal = dot(ball->angular_velocity_.radians_per_second(), contact.normal());
+        ball->angular_velocity_ = AngularVelocity{add(
+            scaled(contact.normal(), spin_about_normal),
+            scaled(cross(slowed, arm), 1.0F / (ball_radius * ball_radius)))};
     }
 
     void step(float time_step) {

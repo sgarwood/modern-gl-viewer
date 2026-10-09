@@ -97,6 +97,21 @@ const LinearVelocity& RigidBody::linear_velocity() const noexcept { return veloc
 const AngularVelocity& RigidBody::angular_velocity() const noexcept { return angular_velocity_; }
 const Mass& RigidBody::mass() const noexcept { return mass_; }
 
+float RigidBody::inverse_inertia() const noexcept {
+    if (motion_ != MotionType::dynamic) {
+        return 0.0F;
+    }
+    const auto radius = sphere_radius(collider_);
+    if (!radius) {
+        return 0.0F;
+    }
+    // A solid sphere: I = 2/5 m r^2. A golf ball is not quite uniform -- its
+    // core is lighter than its cover -- but the difference is under a couple
+    // of percent of I, and well inside the uncertainty on the surface
+    // coefficients it gets multiplied by.
+    return 2.5F / (mass_.kilograms() * *radius * *radius);
+}
+
 float RigidBody::inverse_mass() const noexcept {
     return motion_ == MotionType::dynamic ? 1.0F / mass_.kilograms() : 0.0F;
 }

@@ -435,6 +435,7 @@ if(BUILD_TESTING)
         tests/physics/aerodynamics_test.cpp
         tests/physics/aerodynamic_coefficients_test.cpp
         tests/physics/flight_test.cpp
+        tests/physics/spin_test.cpp
         tests/renderer_test.cpp
         tests/runtime_paths_test.cpp
         tests/scene_test.cpp
