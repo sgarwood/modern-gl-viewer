@@ -274,3 +274,7 @@ animation — which proves the whole chain end to end against an asset we
 generate ourselves, with no importer and no skinning in the way.
 
 Then 1, 2 and 4 together, since a skinned mesh is useless without all three.
+
+### Visual Verification
+
+Always generate a contact sheet (frameboard) to visually verify animation changes. A 3-frame storyboard is insufficient to prove that an animation is smooth or that constraints hold throughout the entire motion. **A minimum of 9 images is required** to say an animation is smoother, evenly sampled across the sequence.

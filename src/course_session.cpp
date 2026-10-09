@@ -656,6 +656,7 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
     std::optional<animation::AnimationPlayerId> character_player;
     std::optional<animation::AnimationClipId> idle_clip;
     std::optional<animation::AnimationClipId> follow_through_clip;
+    std::optional<animation::AnimationClipId> walk_clip;
     if (character_index && character_skin && description.character) {
         const auto entity = entities[*character_index];
         idle_clip = engine.load_animation({
@@ -666,6 +667,12 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
             follow_through_clip = engine.load_animation({
                 .skeleton = description.character->skeleton,
                 .animation = description.character->follow_through,
+            });
+        }
+        if (!description.character->walk.empty()) {
+            walk_clip = engine.load_animation({
+                .skeleton = description.character->skeleton,
+                .animation = description.character->walk,
             });
         }
         const auto player = engine.bind_animation(entity, *idle_clip);
@@ -698,6 +705,7 @@ CourseSession configure_course_session(Engine& engine, const CourseSessionDescri
         .character_player = character_player,
         .idle_clip = idle_clip,
         .follow_through_clip = follow_through_clip,
+        .walk_clip = walk_clip,
         .round = std::make_shared<CourseRound>(description.terrain, rules),
     };
 }
@@ -729,10 +737,14 @@ game::RoundEvent advance_round(
         session.character_player && session.follow_through_clip) {
         engine.play_clip(*session.character_player, *session.follow_through_clip);
     } else if (update.event == game::RoundEvent::ball_came_to_rest &&
+               session.character_player) {
+        if (session.walk_clip) {
+            engine.play_clip(*session.character_player, *session.walk_clip);
+        } else if (session.idle_clip) {
+            engine.play_clip(*session.character_player, *session.idle_clip);
+        }
+    } else if (update.event == game::RoundEvent::reached_ball &&
                session.character_player && session.idle_clip) {
-        // Back to idle when the ball lands rather than when the player
-        // reaches it, or they walk the length of the fairway still frozen
-        // in their finish.
         engine.play_clip(*session.character_player, *session.idle_clip);
     }
 
@@ -909,6 +921,7 @@ CourseSessionDescription default_course_session(const std::filesystem::path& ass
         .skeleton = asset_directory / "characters/quaternius_male_casual_skeleton.ozz",
         .animation = asset_directory / "characters/quaternius_male_casual_idle.ozz",
         .follow_through = asset_directory / "characters/quaternius_male_casual_finish.ozz",
+        .walk = asset_directory / "characters/quaternius_male_casual_walk.ozz",
         // Stand just left of the ball, facing up the hole. The source asset
         // is 4.84 Blender units tall, so this puts the golfer at 1.79 m.
         .position = {4.77F, -46.59F},
