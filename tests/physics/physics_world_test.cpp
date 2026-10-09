@@ -345,3 +345,33 @@ TEST_CASE("only a static body's collider may be replaced") {
             mgv::physics::BodyId{9999}, flat_patch(4, 1.0F, 0.0F), mgv::physics::Position{}),
         std::out_of_range);
 }
+
+TEST_CASE("a raycast ranges a standing capsule") {
+    // What the range finder does to a tree. The trunk runs from the ground to
+    // three metres; the ray leaves at eye height and should come back with
+    // the distance to the near face of the bark.
+    mgv::physics::PhysicsConfiguration configuration;
+    configuration.gravity = mgv::physics::Acceleration{{}};
+    mgv::physics::PhysicsWorld world{configuration};
+    const auto trunk = world.add_body(
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::capsule(
+                mgv::physics::Length{0.18F}, mgv::physics::Length{1.5F})}
+            .motion(mgv::physics::MotionType::static_body)
+            .at(mgv::physics::Position{{5.0F, 1.5F, 0.0F}})
+            .build());
+
+    const auto hit = world.raycast(
+        mgv::physics::Position{{0.0F, 1.6F, 0.0F}}, {1.0F, 0.0F, 0.0F});
+
+    REQUIRE(hit);
+    CHECK(hit->body == trunk);
+    CHECK(hit->distance == Catch::Approx(4.82F).margin(0.001F));
+    CHECK(hit->normal.x == Catch::Approx(-1.0F));
+    CHECK(hit->normal.y == Catch::Approx(0.0F));
+
+    // Over the top of it, where an infinite cylinder would have reported a
+    // hit and a rangefinder would have read the distance to thin air.
+    CHECK_FALSE(world.raycast(
+        mgv::physics::Position{{0.0F, 6.0F, 0.0F}}, {1.0F, 0.0F, 0.0F}));
+}

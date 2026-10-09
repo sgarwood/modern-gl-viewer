@@ -16,6 +16,20 @@ struct BoxCollider final {
     Dimensions half_extents;
 };
 
+/// A cylinder with hemispherical ends, standing on the Y axis.
+///
+/// Upright rather than free: a trunk and a flagstick both stand up, and an
+/// arbitrary axis would cost a rotation on every contact to serve nothing
+/// this course contains. The caps are the price of the cheap closest-point
+/// test, and on a tree they fall underground and up inside the canopy where
+/// nothing can reach them.
+struct CapsuleCollider final {
+    Length radius;
+    /// Half the length of the segment the radius is swept along, so the whole
+    /// thing stands `2 * (half_height + radius)` tall.
+    Length half_height;
+};
+
 struct HeightmapCollider final {
     int width;
     int depth;
@@ -24,12 +38,14 @@ struct HeightmapCollider final {
     std::vector<float> heights;
 };
 
-using ColliderShape = std::variant<SphereCollider, BoxCollider, HeightmapCollider>;
+using ColliderShape =
+    std::variant<SphereCollider, BoxCollider, CapsuleCollider, HeightmapCollider>;
 
 class Collider final {
 public:
     [[nodiscard]] static Collider sphere(Length radius);
     [[nodiscard]] static Collider box(Dimensions half_extents);
+    [[nodiscard]] static Collider capsule(Length radius, Length half_height);
     [[nodiscard]] static Collider heightmap(
         int width,
         int depth,

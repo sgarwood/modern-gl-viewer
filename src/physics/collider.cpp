@@ -25,6 +25,16 @@ Collider Collider::box(Dimensions half_extents) {
     return Collider{BoxCollider{half_extents}};
 }
 
+Collider Collider::capsule(Length radius, Length half_height) {
+    if (radius.metres() <= 0.0F) {
+        throw std::invalid_argument{"Capsule collider radius must be positive"};
+    }
+    if (half_height.metres() < 0.0F) {
+        throw std::invalid_argument{"Capsule collider half height cannot be negative"};
+    }
+    return Collider{CapsuleCollider{radius, half_height}};
+}
+
 Collider Collider::heightmap(
     int width,
     int depth,

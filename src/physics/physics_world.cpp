@@ -189,6 +189,36 @@ public:
                 }
             }
         }
+        if (std::holds_alternative<CapsuleCollider>(body.collider().shape())) {
+            const auto& capsule = std::get<CapsuleCollider>(body.collider().shape());
+            const float r = capsule.radius.metres();
+            const float h = capsule.half_height.metres();
+            // The capsule stands on Y, so this is a circle in plan. The caps
+            // are left out: on a trunk they are underground and inside the
+            // canopy, and a range finder that reported the distance to a
+            // hemisphere buried under a tree would be worse than one that
+            // reported nothing.
+            const float ox = o.x - pos.x;
+            const float oz = o.z - pos.z;
+            const float a = d.x * d.x + d.z * d.z;
+            if (a > 1e-6F) {
+                const float b = 2.0F * (ox * d.x + oz * d.z);
+                const float c = ox * ox + oz * oz - r * r;
+                const float discriminant = b * b - 4.0F * a * c;
+                if (discriminant > 0.0F) {
+                    const float t1 = (-b - std::sqrt(discriminant)) / (2.0F * a);
+                    if (t1 > 0.0F) {
+                        const Vec3 hit_p = add_v(o, scaled_v(d, t1));
+                        if (hit_p.y >= pos.y - h && hit_p.y <= pos.y + h) {
+                            const Vec3 normal = normalize_v(
+                                Vec3{hit_p.x - pos.x, 0.0F, hit_p.z - pos.z});
+                            return RaycastHit{body.id(), Position{hit_p}, normal, t1};
+                        }
+                    }
+                }
+            }
+        }
+
         if (std::holds_alternative<HeightmapCollider>(body.collider().shape())) {
             const auto& hm = std::get<HeightmapCollider>(body.collider().shape());
             float min_h = 0.0f, max_h = 0.0f;
