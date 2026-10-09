@@ -14,6 +14,8 @@ TEST_CASE("the default course bundles a renderable Quaternius player") {
     REQUIRE(description.character.has_value());
     const auto& character = *description.character;
     CHECK(character.model.filename() == "quaternius_male_casual.glb");
+    CHECK(character.follow_through.filename() == "quaternius_male_casual_swing.ozz");
+    CHECK(character.follow_through_start.count() > 0.0F);
     CHECK(character.scale > 0.0F);
 
     const auto model = mgv::GltfLoader{}.load(character.model);

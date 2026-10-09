@@ -160,6 +160,10 @@ int main(int argc, char** argv) {
         "character-z-up", "Stand a Z-up asset upright."};
     const QCommandLineOption follow_through_option{
         "follow-through", "Clip the character plays when a long shot is struck.", "ozz"};
+    const QCommandLineOption follow_through_start_option{
+        "follow-through-start",
+        "Seconds into a full swing clip at which the simulated shot enters.",
+        "seconds"};
     const QCommandLineOption club_option{
         "club", "Binary STL club held in the lead hand.", "stl"};
     const QCommandLineOption grip_option{
@@ -210,6 +214,7 @@ int main(int argc, char** argv) {
                                character_scale_option,
                                character_z_up_option,
                                follow_through_option,
+                               follow_through_start_option,
                                frame_dir_option,
                                rate_option,
                                trace_option,
@@ -366,6 +371,15 @@ int main(int argc, char** argv) {
             }
             character.z_up = parser.isSet(character_z_up_option);
             description.character = character;
+        }
+        if (parser.isSet(follow_through_start_option) && description.character) {
+            const auto start = parser.value(follow_through_start_option).toFloat();
+            if (start < 0.0F) {
+                std::fprintf(stderr, "--follow-through-start cannot be negative.\n");
+                return 2;
+            }
+            description.character->follow_through_start =
+                mgv::animation::AnimationDuration{start};
         }
         if (parser.isSet(ball_option)) {
             const auto lie = parse_vec3(parser.value(ball_option));

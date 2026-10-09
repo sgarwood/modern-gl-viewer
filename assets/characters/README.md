@@ -24,10 +24,10 @@ mv Animation.ozz quaternius_male_casual_idle.ozz
 
 See `LICENSE.txt` for the source and CC0 dedication.
 
-## The follow-through
+## The golf swing
 
-`quaternius_male_casual_finish.ozz` is motion capture, not hand animation:
-take `64_01` from the Carnegie Mellon Graphics Lab Motion Capture Database,
+`quaternius_male_casual_swing.ozz` is motion capture, not hand animation:
+take `64_08` from the Carnegie Mellon Graphics Lab Motion Capture Database,
 subject 64, a golf swing. CMU's data is free for all uses; the BVH
 conversion is Bruce Hahne's, released for free use worldwide.
 
@@ -36,22 +36,24 @@ conversion is Bruce Hahne's, released for free use worldwide.
   - Mirror the file was fetched from: https://github.com/una-dinosauria/cmu-mocap
 
 The capture is retargeted onto this character by
-`tools/retarget/retarget_bvh.py`, and trimmed to the stretch from impact to
-the finish, because the round plays it on `long_shot_struck` and the ball
-has already gone by then:
+`tools/retarget/retarget_bvh.py`. Keep the whole take from address through
+the held finish. The launch-monitor session seeks to impact at runtime;
+tools and other modes can therefore show the complete swing without carrying
+two subtly different animation assets:
 
 ```sh
 blender --background --python tools/retarget/retarget_bvh.py -- \
-  assets/characters/quaternius_male_casual.glb 64_01.bvh finish.glb 1 322:450 180
-gltf2ozz --file=finish.glb
-mv GolfSwing.ozz assets/characters/quaternius_male_casual_finish.ozz
+  assets/characters/quaternius_male_casual.glb 64_08.bvh swing.glb \
+  1 150:250 180 in-place 220
+gltf2ozz --file=swing.glb
+mv GolfSwing.ozz assets/characters/quaternius_male_casual_swing.ozz
 ```
 
-The arguments after the paths are the frame step, the trim, and a yaw in
-degrees. Run without a trim and the script reports where the finish and
-impact fall, which is how the numbers above were found: the hands are
-highest at the finish and dip just before it, so impact is the low point in
-the second preceding the global maximum. Searching the whole take instead
-finds the address, where the hands are just as low and nothing has
-happened. The yaw turns the capture to face this course's target -- which
+The arguments after the paths are the frame step, trim, yaw in degrees, root
+mode, and impact frame. `in-place` removes the recording's global drift because
+the course owns where the golfer stands. The script also plants the feet,
+bakes a two-hand grip constraint, and reports the `0.5833` second runtime entry
+used by `CourseCharacter::follow_through_start`. The trim keeps the stable
+address through the balanced finish while dropping the capture's lead-in and
+recovery step. The yaw turns the capture to face this course's target -- which
 way the subject happened to hit is a property of the recording session.

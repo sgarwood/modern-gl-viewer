@@ -1,6 +1,7 @@
 """Retarget a CMU BVH motion onto the shipped character's rig.
 
-    blender --background --python retarget.py -- <character.glb> <motion.bvh> <out.glb> [step]
+    blender --background --python retarget_bvh.py -- \
+        <character.glb> <motion.bvh> <out.glb> [step] [trim] [yaw] [root] [impact]
 
 The two skeletons agree on nothing but anatomy: CMU's has different bone
 names, different proportions and different rest orientations. What they do
@@ -56,11 +57,21 @@ def arguments():
         after = sys.argv[sys.argv.index("--") + 1:]
         character, motion, out = after[0], after[1], after[2]
     except (ValueError, IndexError) as error:
-        raise SystemExit("usage: ... -- <character.glb> <motion.bvh> <out.glb> [step]") from error
-    step = int(after[3]) if len(after) > 3 else 2
+        raise SystemExit(
+            "usage: ... -- <character.glb> <motion.bvh> <out.glb> "
+            "[step] [trim] [yaw] [in-place|source] [impact-frame]"
+        ) from error
+    step = int(after[3]) if len(after) > 3 else 1
+    if step <= 0:
+        raise SystemExit("step must be positive")
     trim = after[4] if len(after) > 4 else None
     yaw = float(after[5]) if len(after) > 5 else 0.0
-    return Path(character).resolve(), Path(motion).resolve(), Path(out).resolve(), step, trim, yaw
+    root_motion = after[6] if len(after) > 6 else "in-place"
+    if root_motion not in {"in-place", "source"}:
+        raise SystemExit("root must be 'in-place' or 'source'")
+    impact = int(after[7]) if len(after) > 7 else None
+    return (Path(character).resolve(), Path(motion).resolve(), Path(out).resolve(),
+            step, trim, yaw, root_motion, impact)
 
 
 def only_armature(objects):
@@ -71,7 +82,7 @@ def only_armature(objects):
 
 
 def main():
-    character, motion, out, step, trim, yaw = arguments()
+    character, motion, out, step, trim, yaw, root_motion, impact = arguments()
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
     before = set(bpy.data.objects)
@@ -141,11 +152,18 @@ def main():
     action = bpy.data.actions.new("GolfSwing")
     target.animation_data.action = action
 
-    lowest = []
+    # Record the grip target while the rig is still pure FK. Adding IK here
+    # would feed each solved pose back into the next source frame and corrupt
+    # the matrices being retargeted. The constraint is added only after every
+    # target key has been extracted.
+    grip_target = bpy.data.objects.new("GolfGripTrailHand", None)
+    bpy.context.scene.collection.objects.link(grip_target)
+
     ground_rest = min(
         target.data.bones[foot].matrix_local.to_translation().z for foot in SHIN_OF_FOOT)
     root = target.pose.bones.get("Bone")
     origin = None
+    planted_feet = {}
     written = 0
     for frame in range(start, end + 1, step):
         scene.frame_set(frame)
@@ -157,14 +175,15 @@ def main():
         hips_now = source.matrix_world @ source.pose.bones["Hips"].matrix.to_translation()
         if origin is None:
             origin = hips_now.copy()
+        travel = Vector((0.0, 0.0, 0.0))
         if root is not None:
-            # Horizontal travel is taken from the capture. The vertical is
-            # not: the subject has different proportions and stood on a
-            # different floor, so carrying their hip height across either
-            # lifts this character off the turf or buries them in it. The
-            # height is decided afterwards, by the feet.
-            travel = (hips_now - origin) * scale
-            travel.z = 0.0
+            # The recording's global translation moves the golfer several
+            # body widths across the tee. A swing is in-place motion; the
+            # course owns where the player stands. Source root motion remains
+            # available for captures where global travel is intentional.
+            if root_motion == "source":
+                travel = (hips_now - origin) * scale
+                travel.z = 0.0
             root.matrix = Matrix.Translation(travel) @ root.bone.matrix_local
             bpy.context.view_layer.update()
 
@@ -184,11 +203,25 @@ def main():
                 posed = target.pose.bones[shin]
                 turn = posed.matrix.to_quaternion() @ shin_rest_rotation[shin].inverted()
                 head = posed.matrix.to_translation() + (turn @ ankle_offset[target_name])
+                # A golf swing pivots on its feet; it does not walk across the
+                # tee. Keep each ankle over its address position while still
+                # allowing the capture's vertical heel lift and rotation.
+                planted = planted_feet.setdefault(target_name, head.copy())
+                head.x = planted.x
+                head.y = planted.y
             bone.matrix = Matrix.Translation(head) @ want.to_matrix().to_4x4()
             bpy.context.view_layer.update()
             bone.keyframe_insert("rotation_quaternion", frame=out_frame)
             if shin:
                 bone.keyframe_insert("location", frame=out_frame)
+
+        lead = target.pose.bones["Palm.L"]
+        # The hands meet around the lower half of the lead palm, not at its
+        # fingertips.  A fingertip target becomes unreachable when both arms
+        # are fully extended in the finish, which makes the trail hand spring
+        # visibly away from the grip on the last few frames.
+        grip_target.location = target.matrix_world @ lead.head.lerp(lead.tail, 0.4)
+        grip_target.keyframe_insert("location", frame=out_frame)
         # Stand them on the ground: drop the root until the lower foot is
         # back where it rests. Planting the feet and letting the hips find
         # their own height is the way round that survives a change of
@@ -203,31 +236,47 @@ def main():
             root.keyframe_insert("location", frame=out_frame)
 
         written += 1
-        lowest.append((target.pose.bones["Palm.L"].head.z, frame))
         if written == -1:
             for probe in ("Hips", "Torso", "Head", "Palm.L", "Foot.L", "LowerLeg.L"):
                 head = target.pose.bones[probe].head
                 print(f"    probe {probe:12s} ({head.x:7.2f},{head.y:7.2f},{head.z:7.2f})")
             print(f"    scale {scale:.4f}  travel {travel.length:.2f}")
 
-    if lowest:
-        # Impact is where the hands bottom out *after* the top of the
-        # backswing. Taking the lowest point of the whole take finds the
-        # address instead, where the hands are just as low and nothing has
-        # happened yet.
-        # The hands are highest at the finish, not at the top of the
-        # backswing, so the finish is the global maximum. Impact is the dip
-        # in the second before it -- searching the whole take instead finds
-        # the address, where the hands are just as low and nothing has
-        # happened yet.
-        finish_height, finish_frame = max(lowest)
-        window = [(h, f) for h, f in lowest
-                  if finish_frame - scene.render.fps >= f > finish_frame - 2 * scene.render.fps]
-        window += [(h, f) for h, f in lowest if finish_frame > f > finish_frame - scene.render.fps]
-        if window:
-            depth, frame = min(window)
-            print(f"    finish frame {finish_frame} (height {finish_height:.2f}); "
-                  f"impact frame {frame} (height {depth:.2f})")
+    # A golf club is a rigid link between the hands. Independent arm
+    # retargeting lets different limb proportions pull the trail hand away
+    # from the grip. Keep its wrist on the lead hand, align the
+    # palm rotations, then bake the solve into ordinary pose keys.
+    ik = target.pose.bones["LowerArm.R"].constraints.new("IK")
+    ik.name = "Keep both hands on golf grip"
+    ik.target = grip_target
+    ik.chain_count = 2
+    rotation = target.pose.bones["Palm.R"].constraints.new("COPY_ROTATION")
+    rotation.name = "Align both hands on golf grip"
+    rotation.target = target
+    rotation.subtarget = "Palm.L"
+
+    # Apply the hand solve to real pose keys. Baking every integer frame is
+    # intentional even when the source was sampled at a coarser step: the IK
+    # path then remains continuous through the fast downswing.
+    bpy.context.view_layer.objects.active = target
+    target.select_set(True)
+    bpy.ops.object.mode_set(mode="POSE")
+    bpy.ops.pose.select_all(action="SELECT")
+    bpy.ops.nla.bake(
+        frame_start=1,
+        frame_end=end - start + 1,
+        only_selected=True,
+        visual_keying=True,
+        clear_constraints=True,
+        use_current_action=True,
+        bake_types={"POSE"},
+    )
+
+    if impact is not None:
+        if not start <= impact <= end:
+            raise SystemExit(f"impact frame {impact} is outside trim {start}:{end}")
+        print(f"    impact frame {impact}; "
+              f"runtime start {(impact - start) / scene.render.fps:.4f}s")
     print(f"retargeted {written} keys from {motion.name} ({start}..{end} step {step}) "
           f"at {scene.render.fps} fps = {(end - start) / scene.render.fps:.2f}s")
     # Drop the capture skeleton before writing. Left in, the file holds two
@@ -235,11 +284,24 @@ def main():
     # -- so a runtime that binds a skin to a skeleton by name can pick the
     # wrong bone and drag the head off into the sky.
     scene.frame_start, scene.frame_end = 1, end - start + 1
+    bpy.ops.object.mode_set(mode="OBJECT")
     bpy.data.objects.remove(source, do_unlink=True)
+    grip_action = grip_target.animation_data.action
+    # Imported source/idle actions otherwise get broadcast back onto the target
+    # armature and produce plausible-looking but broken extra clips. Preserve
+    # the helper's keyed action until export; removing it would leave the IK
+    # target static while Blender evaluates the baked armature.
+    for other in list(bpy.data.actions):
+        if other not in {action, grip_action}:
+            bpy.data.actions.remove(other)
     bpy.ops.object.select_all(action="DESELECT")
+    target.select_set(True)
+    for child in target.children_recursive:
+        if child.type == "MESH":
+            child.select_set(True)
     bpy.ops.export_scene.gltf(filepath=str(out), export_format="GLB",
                               export_animations=True, export_skins=True,
-                              export_yup=True)
+                              export_yup=True, use_selection=True)
     print(f"wrote {out}")
 
 

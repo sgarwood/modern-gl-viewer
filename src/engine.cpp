@@ -539,8 +539,12 @@ void Engine::remove(EntityId entity) {
 
 void Engine::play_clip(
     animation::AnimationPlayerId player,
-    animation::AnimationClipId clip) {
+    animation::AnimationClipId clip,
+    animation::AnimationDuration start,
+    animation::PlaybackMode mode) {
     impl_->animation_system.set_clip(player, clip);
+    impl_->animation_system.set_playback_mode(player, mode);
+    impl_->animation_system.seek(player, start);
     impl_->animation_system.play(player);
 }
 

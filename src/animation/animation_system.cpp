@@ -1,6 +1,14 @@
 #include "mgv/animation/animation_system.hpp"
 
 #include <ozz/animation/runtime/animation.h>
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wignored-attributes"
+#endif
+#include <ozz/animation/runtime/blending_job.h>
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #include <ozz/animation/runtime/local_to_model_job.h>
 #include <ozz/animation/runtime/sampling_job.h>
 #include <ozz/animation/runtime/skeleton.h>
@@ -12,6 +20,7 @@
 #include <ozz/base/span.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <limits>
@@ -79,16 +88,23 @@ struct AnimationSystem::Impl final {
             : id{player_id},
               clip{clip_id},
               context{joints},
+              sampled(static_cast<std::size_t>(soa_joints)),
               locals(static_cast<std::size_t>(soa_joints)),
+              blend_from(static_cast<std::size_t>(soa_joints)),
               models(static_cast<std::size_t>(joints)) {}
 
         AnimationPlayerId id;
         AnimationClipId clip;
         ozz::animation::SamplingJob::Context context;
+        std::vector<ozz::math::SoaTransform> sampled;
         std::vector<ozz::math::SoaTransform> locals;
+        std::vector<ozz::math::SoaTransform> blend_from;
         std::vector<ozz::math::Float4x4> models;
         float time{};
         float playback_rate{1.0F};
+        float blend_elapsed{};
+        bool blending{};
+        PlaybackMode playback_mode{PlaybackMode::loop};
         PlaybackState state{PlaybackState::stopped};
         Transform root;
     };
@@ -135,9 +151,38 @@ struct AnimationSystem::Impl final {
         sampling.animation = &clip.animation;
         sampling.context = &player.context;
         sampling.ratio = player.time / clip.animation.duration();
-        sampling.output = ozz::make_span(player.locals);
+        sampling.output = ozz::make_span(player.sampled);
         if (!sampling.Run()) {
             throw std::runtime_error{"Ozz animation sampling failed"};
+        }
+
+        if (player.blending) {
+            constexpr float blend_duration = 0.1F;
+            const auto weight = std::clamp(player.blend_elapsed / blend_duration, 0.0F, 1.0F);
+            const std::array layers{
+                ozz::animation::BlendingJob::Layer{
+                    .weight = 1.0F - weight,
+                    .transform = ozz::make_span(player.blend_from),
+                    .joint_weights = {},
+                },
+                ozz::animation::BlendingJob::Layer{
+                    .weight = weight,
+                    .transform = ozz::make_span(player.sampled),
+                    .joint_weights = {},
+                },
+            };
+            ozz::animation::BlendingJob blending;
+            blending.layers = ozz::make_span(layers);
+            blending.rest_pose = clip.skeleton.joint_rest_poses();
+            blending.output = ozz::make_span(player.locals);
+            if (!blending.Run()) {
+                throw std::runtime_error{"Ozz animation blending failed"};
+            }
+            if (weight >= 1.0F) {
+                player.blending = false;
+            }
+        } else {
+            player.locals = player.sampled;
         }
 
         ozz::animation::LocalToModelJob local_to_model;
@@ -219,6 +264,7 @@ void AnimationSystem::stop(AnimationPlayerId player) {
     auto& value = impl_->find(player);
     value.state = PlaybackState::stopped;
     value.time = 0.0F;
+    value.blending = false;
     impl_->sample(value);
 }
 
@@ -238,6 +284,10 @@ void AnimationSystem::set_playback_rate(AnimationPlayerId player, float rate) {
     impl_->find(player).playback_rate = rate;
 }
 
+void AnimationSystem::set_playback_mode(AnimationPlayerId player, PlaybackMode mode) {
+    impl_->find(player).playback_mode = mode;
+}
+
 void AnimationSystem::advance(AnimationDuration elapsed) {
     const auto seconds = valid_seconds(elapsed, "Animation elapsed time");
     if (seconds == 0.0F) {
@@ -249,12 +299,28 @@ void AnimationSystem::advance(AnimationDuration elapsed) {
             continue;
         }
         const auto& clip = impl_->find(player.clip);
+        if (player.blending) {
+            player.blend_elapsed += seconds;
+        }
         const auto advanced = static_cast<double>(player.time) +
                               static_cast<double>(seconds) *
                                   static_cast<double>(player.playback_rate);
-        player.time = static_cast<float>(std::fmod(
-            advanced,
-            static_cast<double>(clip.animation.duration())));
+        const auto duration = static_cast<double>(clip.animation.duration());
+        if (player.playback_mode == PlaybackMode::loop) {
+            player.time = static_cast<float>(std::fmod(advanced, duration));
+        } else if (advanced >= duration) {
+            player.time = static_cast<float>(duration);
+            // A completed one-shot stays on its authored finish instead of
+            // flashing back to address for a frame before the camera cuts.
+            player.state = PlaybackState::paused;
+            // A short tail (for example, entering a swing just before its
+            // finish) can end before the cross-fade does. The held pose must
+            // still be the clip's exact authored finish, not a partial blend
+            // with the pose that preceded it.
+            player.blending = false;
+        } else {
+            player.time = static_cast<float>(advanced);
+        }
         impl_->sample(player);
     }
 }
@@ -279,6 +345,10 @@ Transform AnimationSystem::root_transform(AnimationPlayerId player) const {
     return impl_->find(player).root;
 }
 
+AnimationDuration AnimationSystem::duration(AnimationClipId clip) const {
+    return AnimationDuration{impl_->find(clip).animation.duration()};
+}
+
 void AnimationSystem::set_clip(AnimationPlayerId player, AnimationClipId clip) {
     auto& found = impl_->find(player);
     const auto& wanted = impl_->find(clip);
@@ -289,6 +359,10 @@ void AnimationSystem::set_clip(AnimationPlayerId player, AnimationClipId clip) {
     }
     found.clip = clip;
     found.time = 0.0F;
+    found.blend_from = found.locals;
+    found.blend_elapsed = 0.0F;
+    found.blending = true;
+    found.context.Invalidate();
 }
 
 AnimationClipId AnimationSystem::clip_of(AnimationPlayerId player) const {
