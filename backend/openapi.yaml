@@ -1,12 +1,20 @@
 openapi: 3.0.3
 info:
   title: Hardcore Golf Backend API
-  version: 1.0.0
-  description: Backend services for course fetching and live weather integration.
+  version: 1.1.0
+  description: >
+    Backend services for finding a golf club and resolving the conditions a
+    round is played in. The game client never calls the upstream providers
+    directly, so a keyed provider can replace a keyless one without a client
+    release.
+
+    Property names are camelCase, which is what ASP.NET serialises and what
+    the C++ client reads. An earlier revision of this document said
+    snake_case; nothing ever sent it.
 paths:
   /courses:
     get:
-      summary: List all golf courses
+      summary: List the stored golf courses
       responses:
         '200':
           description: A list of golf courses
@@ -16,9 +24,68 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Course'
+  /clubs:
+    get:
+      summary: Search UK golf clubs by name or by a place they are near
+      description: >
+        Backed by OpenStreetMap's Nominatim, restricted to things tagged
+        leisure=golf_course and to Great Britain. Free-text search is not used
+        on its own: a search for "Wentworth Golf Club" returns Wath Golf Club,
+        in Wentworth, because the place name outweighs the club name.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 120
+          example: Surrey
+      responses:
+        '200':
+          description: Matching clubs, nearest match first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Club'
+        '400':
+          description: Validation error
+  /conditions:
+    get:
+      summary: Elevation, weather and sun times over a point on the earth
+      parameters:
+        - name: latitude
+          in: query
+          required: true
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - name: longitude
+          in: query
+          required: true
+          schema: { type: number, minimum: -180, maximum: 180 }
+        - name: name
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: The conditions over that point
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteConditions'
+        '400':
+          description: Latitude or longitude is off the earth
+        '503':
+          description: >
+            The weather service did not answer. Deliberately an error rather
+            than invented numbers: a client told the request failed falls back
+            to Greenwich at midday, while one handed a plausible forecast from
+            a dead service cannot tell that anything is wrong.
   /courses/{id}/weather:
     get:
-      summary: Get live weather data for a specific course
+      summary: Live weather over a stored course
       parameters:
         - name: id
           in: path
@@ -36,30 +103,76 @@ paths:
           description: Course not found
         '400':
           description: Validation error
+        '503':
+          description: The weather service did not answer
 components:
   schemas:
     Course:
       type: object
       properties:
+        id: { type: integer }
+        name: { type: string }
+        location: { type: string }
+        par: { type: integer }
+        latitude: { type: number }
+        longitude: { type: number }
+    Club:
+      type: object
+      properties:
         id:
           type: integer
-        name:
+          format: int64
+          description: The provider's own identifier
+        name: { type: string }
+        address:
           type: string
-        location:
-          type: string
-        par:
+          description: The full address, for telling two clubs of a name apart
+        latitude: { type: number }
+        longitude: { type: number }
+    SiteConditions:
+      type: object
+      properties:
+        name: { type: string }
+        latitude: { type: number }
+        longitude: { type: number }
+        elevationMetres:
+          type: number
+          description: >
+            Metres above sea level, from the weather model's terrain. Air
+            density follows from it and carry distance follows from that.
+        dayOfYear:
           type: integer
+          description: 1 for the first of January
+        utcHours:
+          type: number
+          description: Hours UTC when the conditions were observed
+        sunriseUtcHours: { type: number }
+        sunsetUtcHours: { type: number }
+        weather:
+          $ref: '#/components/schemas/WeatherCondition'
     WeatherCondition:
       type: object
       properties:
-        temperature_c:
+        temperatureC: { type: number }
+        windSpeedMps: { type: number }
+        windDirectionDeg:
           type: number
-        wind_speed_mps:
+          description: >
+            The bearing the wind blows TOWARDS, which is what the engine
+            wants. This is the opposite of the meteorological convention every
+            weather service reports in; providers turn it through 180 on the
+            way in. Getting it backwards puts every crosswind on the wrong
+            side of the fairway.
+        isRaining: { type: boolean }
+        turfWetness:
           type: number
-        wind_direction_deg:
+          description: >
+            0.0 (dry) to 1.0 (flooded). A judgement rather than a measurement:
+            no service reports it. Rain dominates when there is any, and
+            humidity stands in for dew when there is not.
+        pressurePascals:
           type: number
-        is_raining:
-          type: boolean
-        turf_wetness:
+          description: Station pressure, already adjusted for elevation
+        relativeHumidity:
           type: number
-          description: 0.0 (dry) to 1.0 (flooded)
+          description: 0.0 to 1.0
