@@ -657,3 +657,73 @@ TEST_CASE("canopy normals are re-pointed outwards but bark keeps its own") {
         }
     }
 }
+
+TEST_CASE("a trunk collider agrees with the bark it is drawn from") {
+    // The collider and the mesh come from one species profile, which is why
+    // tree_trunk exists rather than the course guessing a radius. This checks
+    // they have not drifted apart.
+    //
+    // A real bole is not a cylinder: it swells at the base -- an oak's flare
+    // is 1.8 times its nominal radius -- and tapers towards the crown, so a
+    // single capsule radius cannot equal all of it. What it can do is stand
+    // inside the bark's own taper rather than outside it, which is what is
+    // checked. Sampling a band of the bole instead would depend on where the
+    // revolution happens to put its rings, and a pine has none between a
+    // tenth and four fifths of its height.
+    for (const auto species : {mgv::TreeSpecies::oak,
+                               mgv::TreeSpecies::beech,
+                               mgv::TreeSpecies::maple,
+                               mgv::TreeSpecies::pine}) {
+        const mgv::TreeDescription description{
+            .species = species, .height = 11.0F, .spread = 1.0F, .seed = 5u};
+        const auto trunk = mgv::tree_trunk(description);
+        const auto mesh = mgv::make_tree(description);
+
+        CHECK(trunk.radius > 0.0F);
+        CHECK(trunk.height > 0.0F);
+
+        auto narrowest = std::numeric_limits<float>::max();
+        float widest = 0.0F;
+        float bark_top = 0.0F;
+        for (const auto& vertex : mesh.vertices) {
+            // tex_coord.x marks material: 0 is bark, 1 is canopy.
+            if (vertex.tex_coord.x > 0.5F || vertex.position.y > trunk.height) {
+                continue;
+            }
+            const auto radius = std::sqrt(
+                vertex.position.x * vertex.position.x +
+                vertex.position.z * vertex.position.z);
+            bark_top = std::max(bark_top, vertex.position.y);
+            widest = std::max(widest, radius);
+            // The profile closes to a point at the base and at the top of the
+            // bole; a zero radius is the axis, not the wood.
+            if (radius > 1.0e-4F) {
+                narrowest = std::min(narrowest, radius);
+            }
+        }
+
+        CHECK(widest > 0.0F);
+        CHECK(trunk.radius >= narrowest);
+        CHECK(trunk.radius <= widest);
+        // The bole is solid for as far as there is bark to be solid.
+        CHECK(bark_top == Catch::Approx(trunk.height).margin(0.05F));
+    }
+}
+
+TEST_CASE("the tree profile holds its proportions") {
+    // One species pinned exactly, so the table the mesh and the collider
+    // share cannot be edited without a test saying so.
+    const auto oak = mgv::tree_trunk(
+        {.species = mgv::TreeSpecies::oak, .height = 11.0F, .spread = 1.0F, .seed = 1u});
+
+    CHECK(oak.radius == Catch::Approx(0.572F).margin(0.001F));
+    CHECK(oak.height == Catch::Approx(3.74F).margin(0.001F));
+
+    // A pine is the narrow pole: nearly all trunk, and thinner than an oak
+    // of the same height.
+    const auto pine = mgv::tree_trunk(
+        {.species = mgv::TreeSpecies::pine, .height = 11.0F, .spread = 1.0F, .seed = 1u});
+
+    CHECK(pine.radius < oak.radius);
+    CHECK(pine.height > oak.height * 2.0F);
+}

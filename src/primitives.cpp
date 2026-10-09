@@ -782,33 +782,24 @@ void append_conifer_crown(
         mesh, canopy_first, {0.0F, bare_height + crown_height * 0.42F, 0.0F}, 0.42F);
 }
 
-} // namespace
+/// Proportions are the species. Crown half-width and the height the foliage
+/// starts at identify an oak from a beech across a fairway long before any
+/// difference in colour does.
+///
+/// At file scope rather than inside `make_tree`, because the trunk collider
+/// is built from the same numbers and the two must not drift.
+struct Profile final {
+    /// How far up the trunk is still substantial, as a fraction of height.
+    /// Both the mesh and the trunk collider are built from it, so it must
+    /// describe the wood rather than where the revolution happens to close.
+    float trunk_fraction;
+    float trunk_radius_scale;  // trunk radius, as a fraction of height
+    float flare;               // how much the base swells
+    CrownShape crown;
+};
 
-MeshData make_tree(const TreeDescription& description) {
-    if (!(description.height > 0.0F)) {
-        throw std::invalid_argument{"A tree needs a positive height"};
-    }
-    if (!(description.spread > 0.0F)) {
-        throw std::invalid_argument{"A tree needs a positive spread"};
-    }
-
-    Rng rng{description.seed};
-    const auto height = description.height;
-    const auto spread = description.spread;
-    MeshData mesh;
-
-    // Proportions are the species. Crown half-width and the height the
-    // foliage starts at identify an oak from a beech across a fairway long
-    // before any difference in colour does.
-    struct Profile final {
-        float trunk_fraction;      // bole height, as a fraction of height
-        float trunk_radius_scale;  // trunk radius, as a fraction of height
-        float flare;               // how much the base swells
-        CrownShape crown;
-    };
-
-    const auto profile = [&]() -> Profile {
-        switch (description.species) {
+[[nodiscard]] Profile tree_profile(TreeSpecies species, float spread) {
+    switch (species) {
         case TreeSpecies::oak:
             // A short, heavy bole dividing low into a crown wider than the
             // tree is tall, carried on a few massive limbs.
@@ -827,10 +818,34 @@ MeshData make_tree(const TreeDescription& description) {
                     {.base_fraction = 0.34F, .radius_fraction = 0.38F * spread,
                      .vertical = 0.98F, .lobes = 9, .limbs = 4, .limb_reach = 0.60F}};
         case TreeSpecies::pine:
-            return {0.92F, 0.028F, 1.55F, {}};
+            // 0.82 is where the pole has tapered to under half its radius
+            // and stops being worth colliding with. It used to read 0.92,
+            // which nothing used: the mesh below carried its own literals,
+            // so the number was free to be wrong and was. Reading it for a
+            // collider stood a capsule a metre above where the bark had
+            // narrowed to a point, which is a ball bouncing off thin air.
+            return {0.82F, 0.028F, 1.55F, {}};
         }
-        return {};
-    }();
+    return {};
+}
+
+} // namespace
+
+MeshData make_tree(const TreeDescription& description) {
+    if (!(description.height > 0.0F)) {
+        throw std::invalid_argument{"A tree needs a positive height"};
+    }
+    if (!(description.spread > 0.0F)) {
+        throw std::invalid_argument{"A tree needs a positive spread"};
+    }
+
+    Rng rng{description.seed};
+    const auto height = description.height;
+    const auto spread = description.spread;
+    MeshData mesh;
+
+    const auto profile = tree_profile(description.species, spread);
+
 
     if (description.species == TreeSpecies::pine) {
         // A straight pole, bare for the lower third, in tiers to a point.
@@ -840,8 +855,8 @@ MeshData make_tree(const TreeDescription& description) {
             {{0.0F, 0.0F},
              {trunk_radius * profile.flare, 0.0F},
              {trunk_radius, height * 0.12F},
-             {trunk_radius * 0.42F, height * 0.82F},
-             {0.0F, height * 0.94F}},
+             {trunk_radius * 0.42F, height * profile.trunk_fraction},
+             {0.0F, height * (profile.trunk_fraction + 0.12F)}},
             8,
             0.0F);
         append_conifer_crown(mesh, rng, height, height * 0.34F, height * 0.17F * spread);
@@ -862,6 +877,14 @@ MeshData make_tree(const TreeDescription& description) {
         0.0F);
     append_broadleaf_crown(mesh, rng, height, trunk_top, trunk_radius, profile.crown);
     return mesh;
+}
+
+TreeTrunk tree_trunk(const TreeDescription& description) noexcept {
+    const auto profile = tree_profile(description.species, description.spread);
+    return {
+        .radius = description.height * profile.trunk_radius_scale,
+        .height = description.height * profile.trunk_fraction,
+    };
 }
 
 MeshData make_leaf(int segments) {
