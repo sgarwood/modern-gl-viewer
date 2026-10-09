@@ -27,7 +27,10 @@ explicit operations:
 
 - `stop` returns the player to its initial pose.
 - `seek` clamps to the inclusive clip range, so seeking to the duration samples the end pose.
-- Playing past the duration loops to the start.
+- Looping playback wraps at the duration. One-shot playback holds its authored
+  final pose and becomes paused instead of flashing back to its first frame.
+- Clip changes cross-fade over 100 ms, including when a full swing is entered
+  at impact, so a launch-monitor event cannot produce a one-frame pose snap.
 - Playback rates must be finite and positive.
 - Elapsed and seek durations must be finite and non-negative.
 
@@ -83,8 +86,9 @@ reason to keep. `CourseCharacter::z_up` applies the correction to the model matr
 the vertices: the palette is in the skeleton's own space, so rotating the mesh without rotating
 the palette tears the character apart.
 
-Blending, layers, events, and inverse kinematics remain future work, as does attaching equipment
-to a joint -- though the palette that needs is now published.
+Animation layers and events remain future work. Clip cross-fades are handled by
+the runtime; equipment sockets and the golf swing's two-hand IK are part of the
+character pipeline described in [`docs/characters.md`](characters.md).
 
 ## Converting assets
 

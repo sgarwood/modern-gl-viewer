@@ -678,8 +678,12 @@ game::RoundEvent advance_round(
     // shot is long; which clip that corresponds to is the session's business,
     // since the round knows nothing of animation.
     if (update.event == game::RoundEvent::long_shot_struck &&
-        session.character_player && session.follow_through_clip) {
-        engine.play_clip(*session.character_player, *session.follow_through_clip);
+        description.character && session.character_player && session.follow_through_clip) {
+        engine.play_clip(
+            *session.character_player,
+            *session.follow_through_clip,
+            description.character->follow_through_start,
+            animation::PlaybackMode::once);
     } else if (update.event == game::RoundEvent::ball_came_to_rest &&
                session.character_player) {
         if (session.walk_clip) {
@@ -864,7 +868,8 @@ CourseSessionDescription default_course_session(const std::filesystem::path& ass
         .model = asset_directory / "characters/quaternius_male_casual.glb",
         .skeleton = asset_directory / "characters/quaternius_male_casual_skeleton.ozz",
         .animation = asset_directory / "characters/quaternius_male_casual_idle.ozz",
-        .follow_through = asset_directory / "characters/quaternius_male_casual_finish.ozz",
+        .follow_through = asset_directory / "characters/quaternius_male_casual_swing.ozz",
+        .follow_through_start = animation::AnimationDuration{0.5833F},
         .walk = asset_directory / "characters/quaternius_male_casual_walk.ozz",
         // Stand just left of the ball, facing up the hole. The source asset
         // is 4.84 Blender units tall, so this puts the golfer at 1.79 m.

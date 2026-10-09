@@ -193,10 +193,14 @@ public:
     bool update_mesh(EntityId entity, const MeshData& mesh);
     void add_foliage_volume(physics::FoliageVolume volume);
 
-    /// Switches an animation player to another clip and plays it from the
-    /// start. Immediate, not queued: a swing has to begin on the frame the
-    /// ball was struck, not on the next one.
-    void play_clip(animation::AnimationPlayerId player, animation::AnimationClipId clip);
+    /// Switches an animation player to another clip and plays it immediately.
+    /// A full swing can be kept as one source asset while a launch-monitor
+    /// session enters it at impact and plays the remainder only once.
+    void play_clip(
+        animation::AnimationPlayerId player,
+        animation::AnimationClipId clip,
+        animation::AnimationDuration start = animation::AnimationDuration::zero(),
+        animation::PlaybackMode mode = animation::PlaybackMode::loop);
 
     /// The clip's joint names, in skeleton order. What a socket can name.
     [[nodiscard]] std::vector<std::string> joint_names(

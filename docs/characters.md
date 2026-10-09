@@ -196,7 +196,7 @@ own rest* and applies that to the target's rest, in world space:
     delta       = source_pose * source_rest^-1
     destination = delta * destination_rest
 
-Four things it has to get right, each of which broke it first:
+Seven things it has to get right, each of which broke it first:
 
 - **Orientations only, never whole matrices.** An imported armature
   usually carries a scale on its object; feed that through the pose
@@ -214,6 +214,17 @@ Four things it has to get right, each of which broke it first:
   hovering through the finish, when the legs are straightest; dropping the
   root until the lower foot is back at its rest height survives the change
   of proportions.
+- **Keep swing root motion in-place.** The course positions the player.
+  Global translation from the capture otherwise makes the golfer skate
+  across the tee while the club is moving fastest.
+- **Treat the club as the link between the hands.** Independent arm
+  retargeting separates the trail hand when the two rigs have different
+  limb proportions. The retargeter constrains that wrist to the lower half
+  of the lead palm, then bakes the solve into ordinary animation keys.
+- **Export one action.** Blender otherwise broadcasts compatible actions
+  from the imported character and discarded capture rig onto the target,
+  leaving extra clips that look valid in a converter but animate only a few
+  joints.
 
 Hand-authoring reaches a recognisable posture quickly and a convincing one
 slowly. For a swing proper, retarget motion capture -- see the CMU database

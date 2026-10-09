@@ -66,6 +66,72 @@ TEST_CASE("animation seeking clamps to the end pose") {
     CHECK(animations.root_transform(player).position().x == Catch::Approx(2.0F).margin(0.001F));
 }
 
+TEST_CASE("one-shot animation holds its finish instead of wrapping") {
+    const TestAnimationAssets assets;
+    mgv::animation::AnimationSystem animations;
+    const auto player = animations.create_player(animations.load(assets.paths()));
+
+    animations.set_playback_mode(player, mgv::animation::PlaybackMode::once);
+    animations.seek(player, mgv::animation::AnimationDuration{0.75F});
+    animations.play(player);
+    animations.advance(mgv::animation::AnimationDuration{0.5F});
+
+    CHECK(animations.root_transform(player).position().x ==
+          Catch::Approx(2.0F).margin(0.001F));
+    CHECK(animations.state(player) == mgv::animation::PlaybackState::paused);
+}
+
+TEST_CASE("animation reports its authored duration") {
+    const TestAnimationAssets assets;
+    mgv::animation::AnimationSystem animations;
+    const auto clip = animations.load(assets.paths());
+
+    CHECK(animations.duration(clip).count() == Catch::Approx(1.0F));
+}
+
+TEST_CASE("a short one-shot tail reaches the exact finish despite cross-fading") {
+    const TestAnimationAssets assets;
+    mgv::animation::AnimationSystem animations;
+    const auto first = animations.load(assets.paths());
+    const auto second = animations.load(assets.paths());
+    const auto player = animations.create_player(first);
+
+    animations.seek(player, mgv::animation::AnimationDuration{0.4F});
+    animations.set_clip(player, second);
+    animations.seek(player, mgv::animation::AnimationDuration{0.95F});
+    animations.set_playback_mode(player, mgv::animation::PlaybackMode::once);
+    animations.play(player);
+    animations.advance(mgv::animation::AnimationDuration{0.1F});
+
+    CHECK(animations.root_transform(player).position().x ==
+          Catch::Approx(2.0F).margin(0.001F));
+    CHECK(animations.state(player) == mgv::animation::PlaybackState::paused);
+}
+
+TEST_CASE("clip changes cross-fade instead of snapping between poses") {
+    const TestAnimationAssets assets;
+    mgv::animation::AnimationSystem animations;
+    const auto first = animations.load(assets.paths());
+    const auto second = animations.load(assets.paths());
+    const auto player = animations.create_player(first);
+
+    animations.seek(player, mgv::animation::AnimationDuration{0.4F});
+    animations.set_clip(player, second);
+    animations.seek(player, mgv::animation::AnimationDuration{0.5F});
+    CHECK(animations.root_transform(player).position().x ==
+          Catch::Approx(0.8F).margin(0.001F));
+
+    animations.play(player);
+    animations.advance(mgv::animation::AnimationDuration{0.05F});
+    const auto halfway = animations.root_transform(player).position().x;
+    CHECK(halfway > 0.8F);
+    CHECK(halfway < 1.1F);
+
+    animations.advance(mgv::animation::AnimationDuration{0.05F});
+    CHECK(animations.root_transform(player).position().x ==
+          Catch::Approx(1.2F).margin(0.001F));
+}
+
 TEST_CASE("animation rejects invalid assets, handles, and timing values") {
     mgv::animation::AnimationSystem animations;
     const mgv::animation::AnimationAssetPaths missing{

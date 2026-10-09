@@ -61,7 +61,7 @@ struct CourseClub final {
     /// -Z and its origin sits mid-shaft, so z = 3 is the butt of the grip
     /// and belongs in the hand.
     Vec3 grip_offset{0.0F, 0.0F, -3.0F};
-    Vec3 grip_rotation_degrees{-90.0F, 0.0F, 0.0F};
+    Vec3 grip_rotation_degrees{90.0F, 0.0F, 0.0F};
 };
 
 struct CourseCharacter final {
@@ -72,6 +72,10 @@ struct CourseCharacter final {
     /// The clip played when a shot worth watching is struck. Optional: with
     /// none, the character simply keeps idling through the swing.
     std::filesystem::path follow_through;
+    /// Entry point in the full swing clip when the launch monitor reports
+    /// impact. Keeping the address and backswing in the asset makes it useful
+    /// outside the simulator without delaying the simulated ball flight.
+    animation::AnimationDuration follow_through_start{};
     std::filesystem::path walk;
     /// Where the character stands, in the ground plane.
     Vec2 position{};

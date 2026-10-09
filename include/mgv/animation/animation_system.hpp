@@ -36,6 +36,12 @@ enum class PlaybackState {
     paused,
 };
 
+/// What happens when a playing clip reaches its final pose.
+enum class PlaybackMode {
+    loop,
+    once,
+};
+
 using AnimationDuration = std::chrono::duration<float>;
 
 class AnimationSystem final {
@@ -66,12 +72,14 @@ public:
     void stop(AnimationPlayerId player);
     void seek(AnimationPlayerId player, AnimationDuration time);
     void set_playback_rate(AnimationPlayerId player, float rate);
+    void set_playback_mode(AnimationPlayerId player, PlaybackMode mode);
     void advance(AnimationDuration elapsed);
 
     [[nodiscard]] bool contains(AnimationClipId clip) const noexcept;
     [[nodiscard]] bool contains(AnimationPlayerId player) const noexcept;
     [[nodiscard]] PlaybackState state(AnimationPlayerId player) const;
     [[nodiscard]] Transform root_transform(AnimationPlayerId player) const;
+    [[nodiscard]] AnimationDuration duration(AnimationClipId clip) const;
 
     /// The clip a player is playing.
     [[nodiscard]] AnimationClipId clip_of(AnimationPlayerId player) const;
