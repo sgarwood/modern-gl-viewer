@@ -15,8 +15,13 @@
 #include <stdexcept>
 #include <utility>
 
-QtViewerWidget::QtViewerWidget(mgv::AssetPaths assets, QWidget* parent)
-    : QOpenGLWidget{parent}, assets_{std::move(assets)} {
+QtViewerWidget::QtViewerWidget(
+    mgv::AssetPaths assets,
+    mgv::CourseConditions conditions,
+    QWidget* parent)
+    : QOpenGLWidget{parent},
+      assets_{std::move(assets)},
+      conditions_{std::move(conditions)} {
     setFocusPolicy(Qt::StrongFocus);
     animation_timer_.setInterval(16);
     animation_timer_.setTimerType(Qt::PreciseTimer);
@@ -28,8 +33,9 @@ QtViewerWidget::~QtViewerWidget() {
     cleanup();
 }
 
-void QtViewerWidget::load_assets(mgv::AssetPaths assets) {
+void QtViewerWidget::load_assets(mgv::AssetPaths assets, mgv::CourseConditions conditions) {
     assets_ = std::move(assets);
+    conditions_ = std::move(conditions);
     if (!engine_) {
         return;
     }
@@ -37,7 +43,9 @@ void QtViewerWidget::load_assets(mgv::AssetPaths assets) {
     makeCurrent();
     try {
         course_ = mgv::default_course_session(assets_.model.parent_path());
+        course_.site = conditions_.site;
         session_ = mgv::configure_course_session(*engine_, course_);
+        apply_conditions();
         error_.clear();
         animation_timer_.start();
     } catch (const std::exception& error) {
@@ -77,7 +85,9 @@ void QtViewerWidget::initializeGL() {
             return current == nullptr ? nullptr : current->getProcAddress(QByteArray{name});
         }));
         course_ = mgv::default_course_session(assets_.model.parent_path());
+        course_.site = conditions_.site;
         session_ = mgv::configure_course_session(*engine_, course_);
+        apply_conditions();
         error_.clear();
         animation_timer_.start();
     } catch (const std::exception& error) {
@@ -142,6 +152,21 @@ void QtViewerWidget::keyPressEvent(QKeyEvent* event) {
         return;
     }
     event->accept();
+}
+
+void QtViewerWidget::apply_conditions() {
+    // configure_course_session has already set the air from the site's
+    // elevation. This replaces it with what a service actually measured over
+    // the course, which knows what the weather is doing as well as how high
+    // up it is.
+    engine_->enqueue(mgv::SetWeatherCommand{
+        .temperature_c = conditions_.weather.temperature_c,
+        .wind_speed_mps = conditions_.weather.wind_speed_mps,
+        .wind_direction_deg = conditions_.weather.wind_direction_deg,
+        .pressure_pa = conditions_.weather.pressure_pascals,
+        .relative_humidity = conditions_.weather.relative_humidity,
+        .turf_wetness = conditions_.weather.turf_wetness,
+    });
 }
 
 void QtViewerWidget::cleanup() {

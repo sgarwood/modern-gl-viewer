@@ -123,6 +123,33 @@ The menu selects the model and runtime shaders through QML file dialogs. `MainMe
 validates those URLs and invokes an abstract `EngineLauncher`; the Qt adapter then opens the same
 tested `QtViewerWindow` used by the widgets entrypoint. The menu remains open for rapid relaunches.
 
+### Choosing a course
+
+The menu's course panel searches UK golf clubs and resolves the conditions over the one picked:
+latitude, longitude, elevation, the current weather, and the day's sunrise and sunset. The
+elevation sets the density of the air the ball flies through, and the latitude and the hour set
+where the sun is, so a round at Gleneagles in December is lit and plays differently from one at
+Royal St George's in June.
+
+Both lookups go through the C# backend, which calls OpenStreetMap's Nominatim and Open-Meteo.
+Neither needs an API key, and the client never calls them directly, so a keyed provider can
+replace either without a client release:
+
+```sh
+cd backend/GameBackend && dotnet run     # listens on http://127.0.0.1:5000
+QT_QPA_PLATFORM=wayland ./build/wsl-qml/mgv_qml --backend http://127.0.0.1:5000
+```
+
+**Without a backend the round is played at Greenwich, at sea level, at midday.** That is the
+fallback everywhere: the GLFW shell, the capture tool, and the QML menu until a club is chosen or
+when the search fails. `CourseSite{}` is that place, and `mgv::CourseConditions{}` is that place in
+standard still air. A club found with no live weather over it keeps its own coordinates and plays
+in standard air, because where a course is does not depend on a forecast.
+
+A search blocks the menu for up to five seconds, which is the HTTP client's timeout.
+`ClubDirectory` is a port so that the transport can move off the UI thread without the menu
+changing.
+
 To launch the widgets entrypoint directly without the QML menu:
 
 ```sh

@@ -14,7 +14,7 @@ public:
     QtEngineLauncher(const QtEngineLauncher&) = delete;
     QtEngineLauncher& operator=(const QtEngineLauncher&) = delete;
 
-    void launch(mgv::AssetPaths assets) override;
+    void launch(mgv::AssetPaths assets, mgv::CourseConditions conditions) override;
 
 private:
     std::unique_ptr<QtViewerWindow> window_;
