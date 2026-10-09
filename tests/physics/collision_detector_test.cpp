@@ -131,3 +131,69 @@ TEST_CASE("discrete detector samples sphere-heightmap contacts in either order")
     CHECK(sphere_first->penetration().metres() == Catch::Approx(0.25F));
     CHECK(terrain_first->penetration().metres() == Catch::Approx(0.25F));
 }
+
+TEST_CASE("a ball against a standing capsule is pushed out sideways") {
+    // A tree trunk: 0.18 m through, standing from the ground to 4.8 m.
+    const mgv::physics::DiscreteCollisionDetector detector;
+    const auto trunk = body(
+        1,
+        mgv::physics::Collider::capsule(
+            mgv::physics::Length{0.18F}, mgv::physics::Length{2.4F}),
+        {0.0F, 2.4F, 0.0F});
+    const auto ball = body(
+        2, mgv::physics::Collider::sphere(mgv::physics::Length{0.021335F}),
+        {0.19F, 1.0F, 0.0F});
+
+    const auto contact = detector.detect(ball, trunk);
+
+    REQUIRE(contact);
+    // Horizontal, wherever up the trunk the ball strikes, because the closest
+    // point on an upright axis is at the ball's own height.
+    CHECK(contact->normal().x == Catch::Approx(-1.0F));
+    CHECK(contact->normal().y == Catch::Approx(0.0F));
+    CHECK(contact->penetration().metres() == Catch::Approx(0.011335F).margin(1.0e-5F));
+}
+
+TEST_CASE("a ball that misses the trunk does not touch it") {
+    const mgv::physics::DiscreteCollisionDetector detector;
+    const auto trunk = body(
+        1,
+        mgv::physics::Collider::capsule(
+            mgv::physics::Length{0.18F}, mgv::physics::Length{2.4F}),
+        {0.0F, 2.4F, 0.0F});
+
+    // Past it on the side...
+    CHECK_FALSE(detector.detect(
+        body(2, mgv::physics::Collider::sphere(mgv::physics::Length{0.021335F}),
+             {0.25F, 1.0F, 0.0F}),
+        trunk));
+    // ...and clean over the top of it, which is the segment clamp doing its
+    // job rather than an infinite cylinder catching a ball in the sky.
+    CHECK_FALSE(detector.detect(
+        body(2, mgv::physics::Collider::sphere(mgv::physics::Length{0.021335F}),
+             {0.0F, 9.0F, 0.0F}),
+        trunk));
+}
+
+TEST_CASE("the capsule contact normal follows the order of the pair") {
+    const mgv::physics::DiscreteCollisionDetector detector;
+    const auto trunk_collider = mgv::physics::Collider::capsule(
+        mgv::physics::Length{0.18F}, mgv::physics::Length{2.4F});
+    const auto ball_collider =
+        mgv::physics::Collider::sphere(mgv::physics::Length{0.021335F});
+
+    const auto ball_first = detector.detect(
+        body(1, ball_collider, {0.19F, 1.0F, 0.0F}),
+        body(2, trunk_collider, {0.0F, 2.4F, 0.0F}));
+    const auto trunk_first = detector.detect(
+        body(1, trunk_collider, {0.0F, 2.4F, 0.0F}),
+        body(2, ball_collider, {0.19F, 1.0F, 0.0F}));
+
+    REQUIRE(ball_first);
+    REQUIRE(trunk_first);
+    // The normal always runs from the first body to the second.
+    CHECK(ball_first->normal().x == Catch::Approx(-1.0F));
+    CHECK(trunk_first->normal().x == Catch::Approx(1.0F));
+    CHECK(ball_first->penetration().metres() ==
+          Catch::Approx(trunk_first->penetration().metres()));
+}

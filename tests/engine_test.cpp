@@ -192,6 +192,9 @@ TEST_CASE("engine synchronizes a physics body to its bound renderable") {
     mgv::physics::PhysicsConfiguration physics;
     physics.fixed_time_step = mgv::physics::Duration{0.1F};
     physics.gravity = mgv::physics::Acceleration{{}};
+    // Vacuum: this is about the tick boundary, and a half metre sphere
+    // pushes enough air aside to show up in the third decimal place.
+    physics.air_density = 0.0F;
     mgv::Engine engine{
         std::make_unique<FakeBackend>(probe), std::move(clock), physics};
     const auto entities = engine.set_scene(triangle_scene());
@@ -212,6 +215,9 @@ TEST_CASE("engine applies queued physics commands at the tick boundary") {
     mgv::physics::PhysicsConfiguration physics;
     physics.fixed_time_step = mgv::physics::Duration{0.1F};
     physics.gravity = mgv::physics::Acceleration{{}};
+    // Vacuum: this is about the tick boundary, and a half metre sphere
+    // pushes enough air aside to show up in the third decimal place.
+    physics.air_density = 0.0F;
     mgv::Engine engine{
         std::make_unique<FakeBackend>(probe), std::move(clock), physics};
     const auto entity = engine.set_scene(triangle_scene()).front();

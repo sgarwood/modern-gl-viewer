@@ -59,3 +59,40 @@ TEST_CASE("rigid body builder creates validated body definitions") {
             .restitution(1.1F),
         std::invalid_argument);
 }
+
+TEST_CASE("capsule colliders validate their radius and length") {
+    const auto capsule = mgv::physics::Collider::capsule(
+        mgv::physics::Length{0.18F}, mgv::physics::Length{2.4F});
+    const auto& shape = std::get<mgv::physics::CapsuleCollider>(capsule.shape());
+
+    CHECK(shape.radius.metres() == 0.18F);
+    CHECK(shape.half_height.metres() == 2.4F);
+    // A zero half height is a sphere, which is a legitimate degenerate
+    // capsule; a zero radius is not a shape at all.
+    CHECK_NOTHROW(mgv::physics::Collider::capsule(
+        mgv::physics::Length{0.18F}, mgv::physics::Length{0.0F}));
+    CHECK_THROWS_AS(
+        mgv::physics::Collider::capsule(
+            mgv::physics::Length{0.0F}, mgv::physics::Length{1.0F}),
+        std::invalid_argument);
+    CHECK_THROWS_AS(
+        mgv::physics::Collider::capsule(
+            mgv::physics::Length{0.18F}, mgv::physics::Length{-1.0F}),
+        std::invalid_argument);
+}
+
+TEST_CASE("a capsule has no scalar moment of inertia") {
+    // Only a sphere does. A dynamic capsule gets zero, so it does not spin
+    // rather than spinning wrongly.
+    const auto body = mgv::physics::RigidBody{
+        mgv::physics::BodyId{1},
+        mgv::physics::RigidBodyBuilder{
+            mgv::physics::Collider::capsule(
+                mgv::physics::Length{0.18F}, mgv::physics::Length{2.4F})}
+            .mass(mgv::physics::Mass{1.0F})
+            .build(),
+    };
+
+    CHECK(body.inverse_inertia() == 0.0F);
+    CHECK(body.inverse_mass() == 1.0F);
+}

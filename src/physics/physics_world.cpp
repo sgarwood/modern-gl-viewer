@@ -1,5 +1,6 @@
-#include <iostream>
 #include "mgv/physics/physics_world.hpp"
+
+#include "mgv/physics/aerodynamics.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -41,6 +42,10 @@ namespace {
     return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
+/// Below this relative surface speed a contact counts as rolling rather than
+/// sliding, in m/s.
+inline constexpr float slip_tolerance = 1.0e-3F;
+
 } // namespace
 
 class PhysicsWorldImpl final {
@@ -48,7 +53,9 @@ public:
     PhysicsWorldImpl(
         PhysicsConfiguration value,
         std::unique_ptr<CollisionDetector> detector)
-        : configuration{value}, collision_detector{std::move(detector)} {
+        : configuration{value},
+          collision_detector{std::move(detector)},
+          air_density_{value.air_density} {
         if (configuration.fixed_time_step.seconds() <= 0.0F) {
             throw std::invalid_argument{"Physics fixed timestep must be positive"};
         }
@@ -84,10 +91,13 @@ public:
         }
         body.velocity_ = linear;
         body.angular_velocity_ = angular;
+        rouse(body);
     }
 
     void set_position(BodyId id, Position position) {
-        find_mutable(id).position_ = position;
+        auto& body = find_mutable(id);
+        body.position_ = position;
+        rouse(body);
     }
 
     void set_static_collider(BodyId id, Collider collider, Position position) {
@@ -97,6 +107,16 @@ public:
         }
         body.collider_ = std::move(collider);
         body.position_ = position;
+        // The ground has moved out from under whatever was lying on it. The
+        // streamed collision patch is rebuilt from the same analytic surface,
+        // so the heights should agree to a fraction of a millimetre -- but
+        // "should" is doing a lot of work in that sentence, and a ball left
+        // asleep over a patch that disagreed would hang in the air.
+        for (auto& sleeper : bodies) {
+            if (sleeper.motion_ == MotionType::dynamic) {
+                rouse(sleeper);
+            }
+        }
     }
 
     
@@ -168,6 +188,36 @@ public:
                 }
             }
         }
+        if (std::holds_alternative<CapsuleCollider>(body.collider().shape())) {
+            const auto& capsule = std::get<CapsuleCollider>(body.collider().shape());
+            const float r = capsule.radius.metres();
+            const float h = capsule.half_height.metres();
+            // The capsule stands on Y, so this is a circle in plan. The caps
+            // are left out: on a trunk they are underground and inside the
+            // canopy, and a range finder that reported the distance to a
+            // hemisphere buried under a tree would be worse than one that
+            // reported nothing.
+            const float ox = o.x - pos.x;
+            const float oz = o.z - pos.z;
+            const float a = d.x * d.x + d.z * d.z;
+            if (a > 1e-6F) {
+                const float b = 2.0F * (ox * d.x + oz * d.z);
+                const float c = ox * ox + oz * oz - r * r;
+                const float discriminant = b * b - 4.0F * a * c;
+                if (discriminant > 0.0F) {
+                    const float t1 = (-b - std::sqrt(discriminant)) / (2.0F * a);
+                    if (t1 > 0.0F) {
+                        const Vec3 hit_p = add_v(o, scaled_v(d, t1));
+                        if (hit_p.y >= pos.y - h && hit_p.y <= pos.y + h) {
+                            const Vec3 normal = normalize_v(
+                                Vec3{hit_p.x - pos.x, 0.0F, hit_p.z - pos.z});
+                            return RaycastHit{body.id(), Position{hit_p}, normal, t1};
+                        }
+                    }
+                }
+            }
+        }
+
         if (std::holds_alternative<HeightmapCollider>(body.collider().shape())) {
             const auto& hm = std::get<HeightmapCollider>(body.collider().shape());
             float min_h = 0.0f, max_h = 0.0f;
@@ -200,6 +250,7 @@ public:
 
     void apply_impulse(BodyId id, Impulse impulse) {
         auto& body = find_mutable(id);
+        rouse(body);
         if (body.motion_ == MotionType::static_body) {
             return;
         }
@@ -214,7 +265,7 @@ public:
     void integrate(float time_step) {
         const auto gravity = configuration.gravity.metres_per_second_squared();
         for (auto& body : bodies) {
-            if (body.motion_ == MotionType::static_body) {
+            if (body.motion_ == MotionType::static_body || body.sleeping_) {
                 continue;
             }
             
@@ -222,73 +273,113 @@ public:
             Vec3 v_body = body.velocity_.metres_per_second();
             Vec3 v_wind = wind_.metres_per_second();
             
-            // Check Foliage Wakes
-            bool inside_foliage = false;
-            float current_density = 0.0f;
-            for (const auto& vol : foliage_volumes_) {
-                // Check if in wake (simplified: if we are downwind (Z > vol.max.z) and within X/Y bounds)
-                // For this slice, just assume wind blows along Z axis.
-                // Wake zone extends 20 meters behind the tree.
-                if (body.position_.metres().x >= vol.min.x && body.position_.metres().x <= vol.max.x &&
-                    body.position_.metres().y >= vol.min.y && body.position_.metres().y <= vol.max.y) {
-                    
-                    if (body.position_.metres().z >= vol.min.z && body.position_.metres().z <= vol.max.z) {
-                        inside_foliage = true;
-                        current_density = vol.density;
-                        // Inside tree: wind drops to 20%
-                        v_wind = scaled(v_wind, 0.2f);
-                    } else if (body.position_.metres().z > vol.max.z && body.position_.metres().z < vol.max.z + 20.0f) {
-                        // Wake recovery
-                        float dist = body.position_.metres().z - vol.max.z;
-                        float recovery = 0.2f + 0.8f * (dist / 20.0f);
-                        v_wind = scaled(v_wind, recovery);
-                        
-                        // Add turbulence (von Karman vortex)
-                        v_wind.x += std::sin(dist * 2.0f) * 1.5f;
-                    }
+            // Shelter, and the drag of passing through a canopy.
+            //
+            // Neither depends on which way the wind happens to be blowing,
+            // which is what the previous version assumed: it compared the
+            // ball against the volume's Z bounds and called that downwind,
+            // so a crosswind sheltered nothing and a headwind sheltered the
+            // wrong side of the tree.
+            //
+            // What is gone with it is a probabilistic branch strike that
+            // drew on the sine of the ball's own z coordinate, teleported
+            // the velocity when it fired, and printed THWACK to standard
+            // output from inside the solver. A ball through a canopy now
+            // simply loses speed to it, continuously and repeatably, which
+            // is both nearer the truth and something a test can state.
+            float canopy_density = 0.0F;
+            const auto wind_speed = length(wind_.metres_per_second());
+            const auto wind_direction = wind_speed > 0.0F
+                ? scaled(Vec3{wind_.metres_per_second().x, 0.0F,
+                              wind_.metres_per_second().z},
+                         1.0F / wind_speed)
+                : Vec3{0.0F, 0.0F, 0.0F};
+            for (const auto& volume : foliage_volumes_) {
+                const auto at = body.position_.metres();
+                if (at.y < volume.min.y || at.y > volume.max.y) {
+                    continue;
                 }
-            }
-            
-            if (inside_foliage && length(v_body) > 1.0f) {
-                // Probabilistic branch collision
-                float chance = current_density * length(v_body) * 0.01f;
-                // Deterministic pseudo-random based on position
-                float roll = std::abs(std::sin(body.position_.metres().z * 100.0f));
-                if (roll < chance) {
-                    // Deflect!
-                    body.velocity_ = LinearVelocity{Vec3{v_body.x * 0.2f, -std::abs(v_body.y) * 0.5f, v_body.z * 0.2f}};
-                    std::cout << "[PHYSICS] THWACK! Ball hit a tree branch!" << std::endl;
-                    v_body = body.velocity_.metres_per_second();
+                if (at.x >= volume.min.x && at.x <= volume.max.x &&
+                    at.z >= volume.min.z && at.z <= volume.max.z) {
+                    canopy_density = std::max(canopy_density, volume.density);
+                    // Inside the crown the air is nearly still.
+                    v_wind = scaled(v_wind, 0.2F);
+                    continue;
                 }
+                if (wind_speed <= 0.0F) {
+                    continue;
+                }
+                // Downwind, measured along the wind. The wake recovers over
+                // twenty metres; across the wind it is no wider than the
+                // crown that cast it.
+                const Vec3 centre{
+                    (volume.min.x + volume.max.x) * 0.5F,
+                    (volume.min.y + volume.max.y) * 0.5F,
+                    (volume.min.z + volume.max.z) * 0.5F,
+                };
+                const Vec3 offset{at.x - centre.x, 0.0F, at.z - centre.z};
+                const auto along = dot(offset, wind_direction);
+                constexpr float wake_length = 20.0F;
+                if (along <= 0.0F || along > wake_length) {
+                    continue;
+                }
+                const auto across =
+                    length(subtract(offset, scaled(wind_direction, along)));
+                const auto crown_radius = std::max(
+                    (volume.max.x - volume.min.x) * 0.5F,
+                    (volume.max.z - volume.min.z) * 0.5F);
+                if (across > crown_radius) {
+                    continue;
+                }
+                v_wind = scaled(v_wind, 0.2F + (0.8F * (along / wake_length)));
             }
-            
+
             Vec3 v_air = subtract(v_body, v_wind);
             float v_air_len = length(v_air);
             
-            if (v_air_len > 0.0F && body.inverse_mass() > 0.0F) {
-                // Approximate golf ball constants
+            const auto radius = sphere_radius(body.collider());
+            if (v_air_len > 0.0F && body.inverse_mass() > 0.0F && radius) {
                 const float rho = air_density_;
-                const float r = 0.02135F;
+                // The body's own radius, not a golf ball's. Four things
+                // downstream of this -- the reference area, the Reynolds
+                // number, the moment of inertia and the lever arm to a
+                // contact -- have to be computed from one radius, or a ball
+                // ends up rolling at a speed its own spin contradicts.
+                const float r = *radius;
                 const float A = 3.14159265F * r * r;
                 const float mass = body.mass_.kilograms();
-                
+
+                const Vec3 omega = body.angular_velocity_.radians_per_second();
+                // Magnus acts along omega x v, and the length of that product
+                // also gives the spin across the line of flight -- the only
+                // part of the spin that makes lift. Spin about the direction
+                // of travel is a rifle spin and does nothing here.
+                const Vec3 lift_axis = cross(omega, v_air);
+                const float lift_axis_length = length(lift_axis);
+                const float ratio =
+                    spin_ratio(v_air_len, lift_axis_length / v_air_len, r);
+                const float reynolds = reynolds_number(v_air_len, r, rho);
+
                 // 1. Drag
-                const float C_d = 0.3F;
-                float drag_accel_factor = -0.5F * rho * C_d * A * v_air_len / mass;
-                a_aero = add(a_aero, scaled(v_air, drag_accel_factor));
-                
-                // 2. Magnus Effect (Lift)
-                Vec3 omega = body.angular_velocity_.radians_per_second();
-                Vec3 lift_dir = cross(omega, v_air);
-                float lift_len = length(lift_dir);
-                
-                if (lift_len > 0.0F) {
-                    // Simple constant lift coefficient for the vertical slice proof
-                    const float C_l = 0.2F;
-                    // F_lift = 0.5 * rho * C_l * A * |v|^2 * normalize(lift_dir)
-                    float lift_accel_factor = (0.5F * rho * C_l * A * (v_air_len * v_air_len)) / (mass * lift_len);
-                    a_aero = add(a_aero, scaled(lift_dir, lift_accel_factor));
+                const auto drag = drag_coefficient(ratio, reynolds) +
+                    canopy_drag_coefficient(canopy_density);
+                const float drag_factor = -0.5F * rho * drag * A * v_air_len / mass;
+                a_aero = add(a_aero, scaled(v_air, drag_factor));
+
+                // 2. Magnus effect
+                if (lift_axis_length > 0.0F) {
+                    const float lift = 0.5F * rho * lift_coefficient(ratio) * A *
+                        v_air_len * v_air_len / mass;
+                    a_aero = add(a_aero, scaled(lift_axis, lift / lift_axis_length));
                 }
+
+                // 3. Spin decay. A rate rather than a moment, so that it
+                // vanishes with the spin instead of carrying a lightly
+                // spinning ball through zero; solved implicitly, so that it
+                // cannot do so however coarse the clock is.
+                const float retained =
+                    1.0F / (1.0F + spin_decay_rate(v_air_len, r, rho) * time_step);
+                body.angular_velocity_ = AngularVelocity{scaled(omega, retained)};
             }
 
             const auto total_acceleration = add(gravity, a_aero);
@@ -347,79 +438,249 @@ public:
                 second.velocity_.metres_per_second(), scaled(impulse, second_inverse_mass))};
         }
         
-        // Friction and Rolling Resistance (Tangential)
-        // Recalculate relative velocity after normal impulse
-        const auto new_relative_velocity = subtract(
-            second.velocity_.metres_per_second(),
-            first.velocity_.metres_per_second());
-        const auto v_normal = dot(new_relative_velocity, contact.normal());
-        const auto v_tangent = subtract(new_relative_velocity, scaled(contact.normal(), v_normal));
-        const float v_tangent_len = length(v_tangent);
-        
-        if (v_tangent_len > 0.001F) {
-            Vec3 tangent_dir = scaled(v_tangent, 1.0F / v_tangent_len);
-            
-            // Average dynamic friction
-            float mu = (first.material().dynamic_friction + second.material().dynamic_friction) * 0.5F;
-            
-            // Rolling resistance modifier
-            float rolling_res = std::max(first.material().rolling_resistance, second.material().rolling_resistance);
-            float sand_mod = std::max(first.material().sand_topdressing, second.material().sand_topdressing);
-            
-            // Dynamic Wetness System:
-            // 1. Skidding/Sliding: Water acts as a lubricant (reduces dynamic friction)
-            mu = mu * (1.0f - (wetness_ * 0.4f)); 
-            
-            // 2. Rolling: Water creates viscous drag (increases rolling resistance)
-            rolling_res = rolling_res * (1.0f + (wetness_ * 0.6f));
-            
-            mu += rolling_res + (sand_mod * 0.2F);
-            
-            // Bumpiness (Bobbles) adds micro-deflections to the tangent
-            float bumpiness = std::max(first.material().bumpiness, second.material().bumpiness);
-            if (bumpiness > 0.0F) {
-                // Slower putts are deflected more severely relative to their velocity
-                float deflection_mag = bumpiness * 0.05F / (v_tangent_len + 0.1F);
-                // Pseudo-random deflection based on position (deterministic)
-                float noise_z = std::sin(first.position_.metres().x * 100.0F) * deflection_mag;
-                tangent_dir = add(tangent_dir, {0.0F, 0.0F, noise_z});
-            }
-            
-            // Coulomb limit, as an impulse: the friction force a surface can
-            // sustain is mu times the normal load, over the step. Expressing
-            // it as mu * g * dt alone gives a velocity, not an impulse, and
-            // only happens to come out near the right number for a body that
-            // weighs what a golf ball weighs.
-            const auto load_impulse = mu * 9.81F * time_step / total_inverse_mass;
-            const auto friction_impulse_mag =
-                std::min(v_tangent_len / total_inverse_mass, load_impulse);
-            const auto friction_impulse = scaled(tangent_dir, friction_impulse_mag);
+        // Friction, and the spin it trades against.
+        //
+        // What matters at a contact is the velocity of the material at the
+        // contact point, not of the body's centre. A ball with backspin is
+        // dragging its underside forward across the turf *faster* than it is
+        // travelling, and that is the whole reason a struck approach shot
+        // stops where it lands. Solved on centre velocities alone, spin is a
+        // decoration: it bends the flight and then has no say in what
+        // happens on the ground.
+        const auto first_radius = sphere_radius(first.collider());
+        const auto second_radius = sphere_radius(second.collider());
+        // The normal runs from the first body to the second, so the contact
+        // lies a radius along it from the first centre and a radius back
+        // from the second.
+        const auto first_arm = scaled(contact.normal(), first_radius.value_or(0.0F));
+        const auto second_arm = scaled(contact.normal(), -second_radius.value_or(0.0F));
+        const auto surface_velocity = [](const RigidBody& body, Vec3 arm) {
+            return add(
+                body.velocity_.metres_per_second(),
+                cross(body.angular_velocity_.radians_per_second(), arm));
+        };
+        const auto contact_velocity = subtract(
+            surface_velocity(second, second_arm), surface_velocity(first, first_arm));
+        const auto contact_normal_speed = dot(contact_velocity, contact.normal());
+        const auto slip = subtract(
+            contact_velocity, scaled(contact.normal(), contact_normal_speed));
+        const auto slip_speed = length(slip);
 
-            // tangent_dir is the second body's tangential motion relative to
-            // the first, so friction drags the first along it and the second
-            // against it. Reversing these two drives the contact instead of
-            // retarding it: a ball sliding across level ground accelerates,
-            // and one resting on any slope runs away without bound.
-            first.velocity_ = LinearVelocity{add(
-                first.velocity_.metres_per_second(), scaled(friction_impulse, first_inverse_mass))};
-            second.velocity_ = LinearVelocity{subtract(
-                second.velocity_.metres_per_second(), scaled(friction_impulse, second_inverse_mass))};
+        // Friction and rolling resistance are no longer summed into one
+        // coefficient. They act at different times -- Coulomb friction while
+        // the contact slides, rolling resistance once it does not -- and
+        // adding them made a putt and a landing drive the same event.
+        float mu = (first.material().dynamic_friction + second.material().dynamic_friction) * 0.5F;
+        float rolling_resistance =
+            std::max(first.material().rolling_resistance, second.material().rolling_resistance);
+        const auto sand =
+            std::max(first.material().sand_topdressing, second.material().sand_topdressing);
+
+        // Water lubricates a sliding contact and thickens a rolling one, so
+        // it pulls the two in opposite directions.
+        mu *= 1.0F - (wetness_ * 0.4F);
+        rolling_resistance = rolling_resistance * (1.0F + (wetness_ * 0.6F)) + (sand * 0.2F);
+
+        // The load the surface reacts, as an impulse over this step: the
+        // weight it carries, times the step. Expressing the Coulomb limit as
+        // mu * g * dt alone gives a velocity rather than an impulse, and only
+        // happens to come out near the right number for a body that weighs
+        // what a golf ball weighs.
+        const auto load_impulse = 9.81F * time_step / total_inverse_mass;
+
+        bool rolling = slip_speed <= slip_tolerance;
+        if (!rolling) {
+            const auto tangent_dir = scaled(slip, 1.0F / slip_speed);
+            // The effective mass at the contact for a tangential impulse.
+            // The inertia terms are what split the slip between the centre
+            // and the spin -- five sevenths and two sevenths for a sphere --
+            // and leaving them out is what made spin inert on landing.
+            const auto angular_term = [&tangent_dir](const RigidBody& body, Vec3 arm) {
+                const auto moment = cross(arm, tangent_dir);
+                return body.inverse_inertia() * dot(moment, moment);
+            };
+            const auto tangential_inverse_mass = total_inverse_mass +
+                angular_term(first, first_arm) + angular_term(second, second_arm);
+            if (tangential_inverse_mass > 0.0F) {
+                const auto arresting_impulse = slip_speed / tangential_inverse_mass;
+                const auto limit = mu * load_impulse;
+                const auto impulse = scaled(tangent_dir, std::min(arresting_impulse, limit));
+
+                // tangent_dir is the second body's surface motion relative to
+                // the first, so friction drags the first along it and the
+                // second against it. Reversing these two drives the contact
+                // instead of retarding it: a ball sliding across level ground
+                // accelerates, and one resting on any slope runs away without
+                // bound.
+                first.velocity_ = LinearVelocity{add(
+                    first.velocity_.metres_per_second(), scaled(impulse, first_inverse_mass))};
+                second.velocity_ = LinearVelocity{subtract(
+                    second.velocity_.metres_per_second(), scaled(impulse, second_inverse_mass))};
+                first.angular_velocity_ = AngularVelocity{add(
+                    first.angular_velocity_.radians_per_second(),
+                    scaled(cross(first_arm, impulse), first.inverse_inertia()))};
+                second.angular_velocity_ = AngularVelocity{subtract(
+                    second.angular_velocity_.radians_per_second(),
+                    scaled(cross(second_arm, impulse), second.inverse_inertia()))};
+
+                // The surface could absorb the whole slip, so by the end of
+                // this step the contact is rolling and resistance takes over.
+                rolling = arresting_impulse <= limit;
+            }
+        }
+
+        if (!rolling || rolling_resistance <= 0.0F) {
+            return;
+        }
+
+        // Rolling resistance: a couple opposing the spin, with the static
+        // friction that maintains the roll passing the deceleration on to the
+        // centre. For a solid sphere that works out at five sevenths of
+        // c * g, which is what lets a green's speed be stated in feet and
+        // checked against a stimpmeter rather than against this solver.
+        //
+        // Applied to the one dynamic sphere in the contact. On a golf course
+        // that is the ball against the ground, and two dynamic spheres
+        // rolling on each other is not a thing this game has.
+        RigidBody* ball = nullptr;
+        Vec3 arm{};
+        float ball_radius = 0.0F;
+        if (first.inverse_inertia() > 0.0F && second_inverse_mass <= 0.0F) {
+            ball = &first;
+            arm = first_arm;
+            ball_radius = *first_radius;
+        } else if (second.inverse_inertia() > 0.0F && first_inverse_mass <= 0.0F) {
+            ball = &second;
+            arm = second_arm;
+            ball_radius = *second_radius;
+        }
+        if (ball == nullptr) {
+            return;
+        }
+
+        const auto centre_velocity = ball->velocity_.metres_per_second();
+        const auto normal_speed = dot(centre_velocity, contact.normal());
+        const auto rolling_velocity = subtract(
+            centre_velocity, scaled(contact.normal(), normal_speed));
+        auto rolling_speed = length(rolling_velocity);
+        if (rolling_speed <= 0.0F) {
+            return;
+        }
+        auto direction = scaled(rolling_velocity, 1.0F / rolling_speed);
+
+        // A bobbled surface deflects a roll, and the slower the roll the more
+        // of the deflection shows -- which is why a putt dying at the hole
+        // wanders off its line and one hit firmly holds it. Deterministic in
+        // the ball's position, so a replayed shot replays.
+        const auto bumpiness = std::max(first.material().bumpiness, second.material().bumpiness);
+        if (bumpiness > 0.0F) {
+            const auto across = cross(contact.normal(), direction);
+            const auto deflection = bumpiness * 0.05F / (rolling_speed + 0.1F) *
+                std::sin(ball->position_.metres().x * 100.0F);
+            direction = add(direction, scaled(across, deflection));
+            const auto deflected_length = length(direction);
+            if (deflected_length > 0.0F) {
+                direction = scaled(direction, 1.0F / deflected_length);
+            }
+        }
+
+        // The share of the resistance that reaches the centre: the inertia
+        // term over the inertia and mass terms together, five sevenths for a
+        // solid sphere.
+        const auto inertia_term = ball->inverse_inertia() * ball_radius * ball_radius;
+        const auto reaching_centre = inertia_term / (ball->inverse_mass() + inertia_term);
+        rolling_speed -= std::min(
+            rolling_speed, rolling_resistance * 9.81F * reaching_centre * time_step);
+
+        const auto slowed = scaled(direction, rolling_speed);
+        ball->velocity_ = LinearVelocity{add(scaled(contact.normal(), normal_speed), slowed)};
+        // Spin follows the roll. A rolling ball's spin is not a free
+        // variable, and leaving it where it was while the centre slows
+        // re-introduces a slip for friction to undo next step. Spin about the
+        // normal is left alone: a ball can rotate like a top while it rolls,
+        // and that component is what cut spin on a putt becomes.
+        const auto spin_about_normal = dot(ball->angular_velocity_.radians_per_second(), contact.normal());
+        ball->angular_velocity_ = AngularVelocity{add(
+            scaled(contact.normal(), spin_about_normal),
+            scaled(cross(slowed, arm), 1.0F / (ball_radius * ball_radius)))};
+    }
+
+    /// Whether this body is taking part in the simulation this step.
+    [[nodiscard]] static bool integrating(const RigidBody& body) {
+        return body.motion_ == MotionType::dynamic && !body.sleeping_;
+    }
+
+    static void rouse(RigidBody& body) {
+        body.sleeping_ = false;
+        body.still_seconds_ = 0.0F;
+    }
+
+    void update_sleep(float time_step) {
+        for (auto& body : bodies) {
+            if (body.motion_ == MotionType::static_body || body.sleeping_) {
+                continue;
+            }
+            const auto still =
+                length(body.velocity_.metres_per_second()) <=
+                    configuration.sleep_linear_speed &&
+                length(body.angular_velocity_.radians_per_second()) <=
+                    configuration.sleep_angular_speed;
+            if (!still) {
+                body.still_seconds_ = 0.0F;
+                continue;
+            }
+            body.still_seconds_ += time_step;
+            if (body.still_seconds_ >= configuration.sleep_delay.seconds()) {
+                body.sleeping_ = true;
+                // Zeroed rather than left as they were: whatever remains is
+                // under the threshold by definition, and a round asking
+                // whether the ball has stopped deserves a straight answer.
+                body.velocity_ = LinearVelocity{};
+                body.angular_velocity_ = AngularVelocity{};
+            }
         }
     }
 
     void step(float time_step) {
         integrate(time_step);
         collisions.clear();
-        for (std::size_t first_index = 0; first_index < bodies.size(); ++first_index) {
-            for (std::size_t second_index = first_index + 1;
-                 second_index < bodies.size();
-                 ++second_index) {
-                auto& first = bodies[first_index];
-                auto& second = bodies[second_index];
-                if (first.motion() == MotionType::static_body &&
-                    second.motion() == MotionType::static_body) {
+
+        // Only the pairs with a dynamic body in them. Two pieces of scenery
+        // cannot move relative to one another, so most of a course's pairs
+        // can never produce a contact: ninety trees make four thousand pairs
+        // and all but ninety of them are tree against tree.
+        //
+        // Walking them all anyway cost 5% of a 60 Hz budget with nothing
+        // happening, and 55% at three hundred trees, because the count is
+        // quadratic in a number that only grows as a course gains scenery.
+        //
+        // This is not a spatial broad phase -- a dynamic body is still
+        // compared against every static one -- but it removes the whole of
+        // the quadratic term, and one ball against a course's furniture is
+        // linear.
+        dynamic_indices.clear();
+        for (std::size_t index = 0; index < bodies.size(); ++index) {
+            if (bodies[index].motion() == MotionType::dynamic) {
+                dynamic_indices.push_back(index);
+            }
+        }
+
+        for (const auto dynamic_index : dynamic_indices) {
+            for (std::size_t other = 0; other < bodies.size(); ++other) {
+                if (other == dynamic_index) {
                     continue;
                 }
+                // A pair of dynamic bodies belongs to the lower-numbered of
+                // the two, so that it is resolved once rather than twice.
+                if (bodies[other].motion() == MotionType::dynamic &&
+                    other < dynamic_index) {
+                    continue;
+                }
+                // Kept in index order, because the contact normal runs from
+                // the first body to the second and half the solver depends
+                // on knowing which is which.
+                auto& first = bodies[std::min(dynamic_index, other)];
+                auto& second = bodies[std::max(dynamic_index, other)];
                 auto contact = collision_detector->detect(first, second);
                 if (contact) {
                     collisions.push_back({
@@ -427,19 +688,37 @@ public:
                         .second = second.id(),
                         .contact = *contact,
                     });
-                    resolve(first, second, *contact, time_step);
+                    // Something moving has arrived against something that had
+                    // stopped, so the sleeper is part of the simulation again.
+                    if (integrating(first) && second.sleeping_) {
+                        rouse(second);
+                    } else if (integrating(second) && first.sleeping_) {
+                        rouse(first);
+                    }
+                    // With neither body integrating there is nothing to
+                    // resolve, and resolving anyway is exactly the creep this
+                    // is here to stop: the correction pushes a resting ball
+                    // along the contact normal, which on a slope is downhill,
+                    // every step for as long as it lies there.
+                    if (integrating(first) || integrating(second)) {
+                        resolve(first, second, *contact, time_step);
+                    }
                 }
             }
         }
+        update_sleep(time_step);
     }
 
     PhysicsConfiguration configuration;
     std::unique_ptr<CollisionDetector> collision_detector;
     std::deque<RigidBody> bodies;
     std::vector<Collision> collisions;
+    /// Indices of the dynamic bodies, rebuilt each step. A member rather
+    /// than a local so that a step does not allocate.
+    std::vector<std::size_t> dynamic_indices;
     std::vector<FoliageVolume> foliage_volumes_;
     LinearVelocity wind_{};
-    float air_density_{1.225F};
+    float air_density_{};
     float wetness_{0.0f};
     double accumulated_time{};
     std::uint64_t next_id{1};

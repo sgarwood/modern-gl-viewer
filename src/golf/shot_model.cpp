@@ -112,10 +112,17 @@ BallLaunch StandardShotModel::resolve(const Shot& shot) const {
                         0.0F,
                         forward.z * speed,
                     }},
+                    // Negative `right`, because `right` is the backspin
+                    // axis -- it is what the full swing above spins about
+                    // for a zero spin axis -- and a putt leaves the face
+                    // rolling, not checking. The sign was invisible until
+                    // the solver started reading spin at a contact; with it
+                    // reversed a putt arrives slipping at twice its own
+                    // speed and runs less than a fifth of its length.
                     .angular_velocity = physics::AngularVelocity{{
-                        right.x * rolling_speed,
+                        -right.x * rolling_speed,
                         0.0F,
-                        right.z * rolling_speed,
+                        -right.z * rolling_speed,
                     }},
                 };
             }

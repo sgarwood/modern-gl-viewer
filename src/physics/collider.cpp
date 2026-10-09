@@ -1,7 +1,9 @@
 #include "mgv/physics/collider.hpp"
 
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
+#include <variant>
 #include <utility>
 
 namespace mgv::physics {
@@ -23,6 +25,16 @@ Collider Collider::box(Dimensions half_extents) {
     return Collider{BoxCollider{half_extents}};
 }
 
+Collider Collider::capsule(Length radius, Length half_height) {
+    if (radius.metres() <= 0.0F) {
+        throw std::invalid_argument{"Capsule collider radius must be positive"};
+    }
+    if (half_height.metres() < 0.0F) {
+        throw std::invalid_argument{"Capsule collider half height cannot be negative"};
+    }
+    return Collider{CapsuleCollider{radius, half_height}};
+}
+
 Collider Collider::heightmap(
     int width,
     int depth,
@@ -41,5 +53,10 @@ Collider Collider::heightmap(
 }
 
 const ColliderShape& Collider::shape() const noexcept { return shape_; }
+
+std::optional<float> sphere_radius(const Collider& collider) noexcept {
+    const auto* sphere = std::get_if<SphereCollider>(&collider.shape());
+    return sphere ? std::optional{sphere->radius.metres()} : std::nullopt;
+}
 
 } // namespace mgv::physics
