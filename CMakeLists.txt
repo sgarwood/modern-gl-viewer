@@ -90,6 +90,7 @@ add_library(mgv_core
     src/primitives.cpp
     src/renderer.cpp
     src/runtime_paths.cpp
+    src/solar.cpp
     src/scene.cpp
     src/shader_loader.cpp
     src/texture.cpp
@@ -434,6 +435,7 @@ if(BUILD_TESTING)
         tests/physics/aerodynamics_test.cpp
         tests/renderer_test.cpp
         tests/runtime_paths_test.cpp
+        tests/solar_test.cpp
         tests/scene_test.cpp
         tests/stl_loader_test.cpp
         tests/shader_loader_test.cpp
