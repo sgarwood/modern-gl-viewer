@@ -77,6 +77,9 @@ TEST_CASE("physics world resolves penetration and restitution impulses") {
     mgv::physics::PhysicsConfiguration configuration;
     configuration.fixed_time_step = mgv::physics::Duration{0.01F};
     configuration.gravity = mgv::physics::Acceleration{{}};
+    // Vacuum: this is about the restitution impulse, and a one metre sphere pushes
+    // enough air aside to show up in the fourth decimal place.
+    configuration.air_density = 0.0F;
     mgv::physics::PhysicsWorld world{configuration};
     const auto floor = world.add_body(sphere(mgv::physics::MotionType::static_body, {}));
     const auto falling = world.add_body(

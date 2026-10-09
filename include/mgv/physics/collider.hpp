@@ -2,6 +2,7 @@
 
 #include "mgv/physics/units.hpp"
 
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -43,5 +44,13 @@ private:
 
     ColliderShape shape_;
 };
+
+/// The radius of a sphere collider, and nothing for any other shape.
+///
+/// A solver needs this in three places once bodies are allowed to spin --
+/// the reference area for drag, the moment of inertia, and the lever arm
+/// from a centre to a contact -- and all three have to agree on one number
+/// or a ball rolls at a speed its own spin contradicts.
+[[nodiscard]] std::optional<float> sphere_radius(const Collider& collider) noexcept;
 
 } // namespace mgv::physics

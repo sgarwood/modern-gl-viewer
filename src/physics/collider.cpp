@@ -1,7 +1,9 @@
 #include "mgv/physics/collider.hpp"
 
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
+#include <variant>
 #include <utility>
 
 namespace mgv::physics {
@@ -41,5 +43,10 @@ Collider Collider::heightmap(
 }
 
 const ColliderShape& Collider::shape() const noexcept { return shape_; }
+
+std::optional<float> sphere_radius(const Collider& collider) noexcept {
+    const auto* sphere = std::get_if<SphereCollider>(&collider.shape());
+    return sphere ? std::optional{sphere->radius.metres()} : std::nullopt;
+}
 
 } // namespace mgv::physics

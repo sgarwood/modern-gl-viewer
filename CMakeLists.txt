@@ -105,6 +105,7 @@ target_include_directories(mgv_core SYSTEM PRIVATE "${stb_SOURCE_DIR}")
 target_link_libraries(mgv_core PRIVATE mgv::project_warnings)
 
 add_library(mgv_physics
+    src/physics/aerodynamics.cpp
     src/physics/collider.cpp
     src/physics/collision_detector.cpp
     src/physics/physics_world.cpp
@@ -432,6 +433,8 @@ if(BUILD_TESTING)
         tests/physics/physics_world_test.cpp
         tests/physics/units_test.cpp
         tests/physics/aerodynamics_test.cpp
+        tests/physics/aerodynamic_coefficients_test.cpp
+        tests/physics/flight_test.cpp
         tests/renderer_test.cpp
         tests/runtime_paths_test.cpp
         tests/scene_test.cpp

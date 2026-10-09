@@ -11,6 +11,11 @@ namespace mgv::physics {
 struct PhysicsConfiguration final {
     Duration fixed_time_step{1.0F / 60.0F};
     Acceleration gravity{{0.0F, -9.81F, 0.0F}};
+    /// Density of the air the bodies fly through, in kg/m^3. Sea level on a
+    /// standard day. Alongside gravity because it is the same kind of fact
+    /// about the world, and because a test isolating contact behaviour wants
+    /// to switch it off in the same breath as gravity.
+    float air_density{1.225F};
     std::size_t maximum_substeps{8};
 };
 

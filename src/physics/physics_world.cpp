@@ -1,6 +1,8 @@
 #include <iostream>
 #include "mgv/physics/physics_world.hpp"
 
+#include "mgv/physics/aerodynamics.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -48,7 +50,9 @@ public:
     PhysicsWorldImpl(
         PhysicsConfiguration value,
         std::unique_ptr<CollisionDetector> detector)
-        : configuration{value}, collision_detector{std::move(detector)} {
+        : configuration{value},
+          collision_detector{std::move(detector)},
+          air_density_{value.air_density} {
         if (configuration.fixed_time_step.seconds() <= 0.0F) {
             throw std::invalid_argument{"Physics fixed timestep must be positive"};
         }
@@ -265,30 +269,48 @@ public:
             Vec3 v_air = subtract(v_body, v_wind);
             float v_air_len = length(v_air);
             
-            if (v_air_len > 0.0F && body.inverse_mass() > 0.0F) {
-                // Approximate golf ball constants
+            const auto radius = sphere_radius(body.collider());
+            if (v_air_len > 0.0F && body.inverse_mass() > 0.0F && radius) {
                 const float rho = air_density_;
-                const float r = 0.02135F;
+                // The body's own radius, not a golf ball's. Four things
+                // downstream of this -- the reference area, the Reynolds
+                // number, the moment of inertia and the lever arm to a
+                // contact -- have to be computed from one radius, or a ball
+                // ends up rolling at a speed its own spin contradicts.
+                const float r = *radius;
                 const float A = 3.14159265F * r * r;
                 const float mass = body.mass_.kilograms();
-                
+
+                const Vec3 omega = body.angular_velocity_.radians_per_second();
+                // Magnus acts along omega x v, and the length of that product
+                // also gives the spin across the line of flight -- the only
+                // part of the spin that makes lift. Spin about the direction
+                // of travel is a rifle spin and does nothing here.
+                const Vec3 lift_axis = cross(omega, v_air);
+                const float lift_axis_length = length(lift_axis);
+                const float ratio =
+                    spin_ratio(v_air_len, lift_axis_length / v_air_len, r);
+                const float reynolds = reynolds_number(v_air_len, r, rho);
+
                 // 1. Drag
-                const float C_d = 0.3F;
-                float drag_accel_factor = -0.5F * rho * C_d * A * v_air_len / mass;
-                a_aero = add(a_aero, scaled(v_air, drag_accel_factor));
-                
-                // 2. Magnus Effect (Lift)
-                Vec3 omega = body.angular_velocity_.radians_per_second();
-                Vec3 lift_dir = cross(omega, v_air);
-                float lift_len = length(lift_dir);
-                
-                if (lift_len > 0.0F) {
-                    // Simple constant lift coefficient for the vertical slice proof
-                    const float C_l = 0.2F;
-                    // F_lift = 0.5 * rho * C_l * A * |v|^2 * normalize(lift_dir)
-                    float lift_accel_factor = (0.5F * rho * C_l * A * (v_air_len * v_air_len)) / (mass * lift_len);
-                    a_aero = add(a_aero, scaled(lift_dir, lift_accel_factor));
+                const float drag_factor =
+                    -0.5F * rho * drag_coefficient(ratio, reynolds) * A * v_air_len / mass;
+                a_aero = add(a_aero, scaled(v_air, drag_factor));
+
+                // 2. Magnus effect
+                if (lift_axis_length > 0.0F) {
+                    const float lift = 0.5F * rho * lift_coefficient(ratio) * A *
+                        v_air_len * v_air_len / mass;
+                    a_aero = add(a_aero, scaled(lift_axis, lift / lift_axis_length));
                 }
+
+                // 3. Spin decay. A rate rather than a moment, so that it
+                // vanishes with the spin instead of carrying a lightly
+                // spinning ball through zero; solved implicitly, so that it
+                // cannot do so however coarse the clock is.
+                const float retained =
+                    1.0F / (1.0F + spin_decay_rate(v_air_len, r, rho) * time_step);
+                body.angular_velocity_ = AngularVelocity{scaled(omega, retained)};
             }
 
             const auto total_acceleration = add(gravity, a_aero);
@@ -439,7 +461,7 @@ public:
     std::vector<Collision> collisions;
     std::vector<FoliageVolume> foliage_volumes_;
     LinearVelocity wind_{};
-    float air_density_{1.225F};
+    float air_density_{};
     float wetness_{0.0f};
     double accumulated_time{};
     std::uint64_t next_id{1};
