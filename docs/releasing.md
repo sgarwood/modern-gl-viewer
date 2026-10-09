@@ -3,10 +3,25 @@
 CircleCI has two deliberately separate workflows:
 
 - `build_matrix` runs for ordinary pipelines. Its Ubuntu 24.04 and Windows Server 2022 jobs build
-  and run the complete headless test suite with warnings treated as errors.
+  and run the complete headless test suite with warnings treated as errors, with the frontends
+  switched off -- which is what proves the core still builds without Qt. `build_qml_ubuntu` then
+  builds the same tree with `MGV_BUILD_QML_APP=ON`, which compiles `qml/Main.qml` through
+  `qmlcachegen` and brings `tests/qt/main_menu_controller_test.cpp` into the suite.
 - `manual_prerelease` only runs when the boolean pipeline parameter `run_release` is `true`. It
   independently builds and tests the Qt Quick application on both platforms, creates a Debian
   package and an MSI, then publishes both files as a GitHub prerelease.
+
+`build_qml_ubuntu` exists because the QML was previously built by nothing that runs on a pull
+request. `manual_prerelease` compiled it, but that workflow refuses to run on any branch but
+`main`, so a broken `Main.qml` could only be discovered after it had landed. Qt Quick is a separate
+apt install from `qt6-base-dev`, which is why it is a job of its own rather than a flag on the
+existing one.
+
+It gates compilation, not correctness. `qmlcachegen` will reject a syntax error or a malformed
+object tree; it cannot tell whether a binding onto `menuController` resolves, because that is a
+context property injected at runtime. `qt_add_qml_module` also generates a `mgv_qml_qmllint`
+target, which would catch more, and is not run here: it reports unqualified access to context
+properties, which is exactly how this menu is wired, so it would fail on correct code.
 
 ## CircleCI project setup
 
